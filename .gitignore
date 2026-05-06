@@ -1,0 +1,117 @@
+# ============================================
+# VB6 Retro TUI Designer - Git Ignore
+# For React + Vite + SQL.js project
+# ============================================
+
+# --- DEPENDENCIES ---
+# These are installed via npm install and should not be committed
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# --- BUILD ARTIFACTS ---
+# Generated during build process - never commit these
+dist/
+build/
+.vite/
+*.local
+
+# --- ENVIRONMENT VARIABLES ---
+# Contains sensitive data (API keys, secrets)
+.env
+.env.local
+.env.production
+.env.development
+.env.*.local
+
+# --- SYSTEM FILES (OS Specific) ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+*~
+
+# --- EDITOR CONFIGURATION (Personal preferences) ---
+# VS Code
+.vscode/
+*.code-workspace
+
+# IntelliJ / WebStorm
+.idea/
+*.iml
+*.iws
+
+# Sublime Text
+*.sublime-*
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# --- LOGS ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- DEVELOPMENT DOCUMENTATION ---
+PRD.md
+
+# --- BACKUP FILES (Temporary) ---
+*.bak
+*.backup
+*.orig
+*.old
+*.tmp
+*.temp
+
+# --- DATABASE FILES ---
+# SQLite database files (user data, not code)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sqlite-journal
+
+# --- GENERATED OUTPUT FILES ---
+# Exported HTML files (these are output, not source code)
+Proyecto_*.html
+export_*.html
+*.zip
+*.tar
+*.gz
+
+# --- TESTING ---
+coverage/
+.nyc_output/
+*.lcov
+
+# --- CACHE ---
+.cache/
+.parcel-cache/
+*.tsbuildinfo
+
+# --- LOCAL CONFIGURATION ---
+# Keep .env.example but ignore actual .env files
+!.env.example
+
+# --- DEBUG FILES ---
+*.suo
+*.user
+*.pid
+*.seed
+*.pid.lock
