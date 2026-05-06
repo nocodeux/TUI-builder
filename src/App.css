@@ -11,6 +11,10 @@ body {
   font-size: 14px;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   TEMAS
+   ═══════════════════════════════════════════════════════════════ */
+
 .theme-nano {
   --bg: #000000;
   --panel-bg: #000000;
@@ -55,6 +59,10 @@ body {
   --input-bg: #0a0800;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   LAYOUT PRINCIPAL
+   ═══════════════════════════════════════════════════════════════ */
+
 .app {
   background: var(--bg);
   color: var(--text);
@@ -63,7 +71,16 @@ body {
   height: 100vh;
 }
 
-/* TOOLBAR */
+.main-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TOOLBAR
+   ═══════════════════════════════════════════════════════════════ */
+
 .toolbar {
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border);
@@ -106,19 +123,17 @@ body {
   margin: 0 4px;
 }
 
-.main-layout {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
+/* ═══════════════════════════════════════════════════════════════
+   TOOLBOX
+   ═══════════════════════════════════════════════════════════════ */
 
-/* TOOLBOX */
 .toolbox {
   width: 160px;
   background: var(--panel-bg);
   border-right: 1px solid var(--border);
   padding: 10px;
   overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .toolbox h3 {
@@ -139,6 +154,10 @@ body {
   font-family: monospace;
   color: var(--text);
   transition: background 0.1s;
+  display: block;
+  width: 100%;
+  text-align: left;
+  user-select: none;
 }
 
 .toolbox-item:hover {
@@ -146,7 +165,14 @@ body {
   color: var(--bg);
 }
 
-/* CANVAS with dotted background */
+.toolbox-item:active {
+  cursor: grabbing;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CANVAS
+   ═══════════════════════════════════════════════════════════════ */
+
 .canvas {
   flex: 1;
   overflow: auto;
@@ -155,43 +181,130 @@ body {
   background-size: 8px 8px;
 }
 
-.preview-area {
-  min-height: 100%;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.preview-area > .component-wrapper {
-  flex-shrink: 0;
-}
-
 .canvas.mobile .preview-area {
   max-width: 420px;
   margin: 0 auto;
   width: 100%;
 }
 
-/* COMPONENT WRAPPER - flex flow */
-.component-wrapper {
+.preview-area {
+  min-height: 100%;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  position: relative;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ROW SYSTEM — AutoLayout estilo Figma
+   ═══════════════════════════════════════════════════════════════ */
+
+.layout-row {
+  position: relative;
+  border: 1px dashed transparent;
+  border-radius: 2px;
+  padding: 4px 2px;
+  min-height: 36px;
+  transition: border-color 0.12s, background 0.12s;
+  cursor: default;
+}
+
+.layout-row:hover {
+  border-color: color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.layout-row.row-selected {
+  border-color: var(--accent) !important;
+  background: rgba(255, 255, 0, 0.02);
+}
+
+/* Etiqueta de fila seleccionada */
+.row-label {
+  position: absolute;
+  top: -16px;
+  left: 0;
+  font-size: 9px;
+  color: var(--accent);
+  background: var(--bg);
+  padding: 1px 5px;
+  border: 1px solid var(--accent);
+  pointer-events: none;
+  z-index: 10;
+  white-space: nowrap;
+}
+
+/* Drop zone entre componentes — se expande al hovear */
+.drop-zone {
+  align-self: stretch;
+  flex-shrink: 0;
+  pointer-events: all;
+  cursor: crosshair;
+  border-radius: 2px;
+  transition: width 0.12s, min-width 0.12s, background 0.12s, opacity 0.12s;
+}
+
+/* Nueva fila drop zone */
+.new-row-drop {
+  height: 14px;
+  border: 1px dashed transparent;
+  border-radius: 2px;
   display: flex;
   align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  color: var(--accent);
+  font-size: 9px;
+  margin: 1px 0;
+  cursor: default;
+}
+
+.new-row-drop:hover,
+.new-row-drop.over {
+  height: 36px;
+  border-color: var(--accent);
+  background: rgba(255, 255, 0, 0.04);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT WRAPPER
+   ═══════════════════════════════════════════════════════════════ */
+
+.component-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
   padding: 2px;
-  cursor: pointer;
+  cursor: grab;
   flex-shrink: 0;
   box-sizing: border-box;
   max-width: 100%;
+  outline: none;
+  border: 1px solid transparent;
+  transition: border-color 0.1s;
 }
 
-.component-wrapper > * {
-  max-width: 100%;
+.component-wrapper:hover {
+  border-color: color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+.component-wrapper:active {
+  cursor: grabbing;
+}
+
+.component-wrapper:focus {
+  outline: 1px dashed var(--text-dim);
+  outline-offset: 1px;
 }
 
 .component-wrapper.selected {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  border-color: var(--accent) !important;
+  outline: none;
+}
+
+.component-wrapper.selected > * {
+  /* El borde del wrapper ya indica selección */
 }
 
 .component-wrapper.window-hidden {
@@ -199,43 +312,21 @@ body {
   pointer-events: none;
 }
 
-/* Window container content area */
-.retro-window-content {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 12px;
-  min-height: 40px;
-  border-bottom: 1px dashed transparent;
-  transition: border-color 0.2s;
+.component-wrapper > * {
+  max-width: 100%;
 }
 
-.retro-window-content > .component-wrapper {
-  flex-shrink: 0;
-}
+/* ═══════════════════════════════════════════════════════════════
+   INSPECTOR
+   ═══════════════════════════════════════════════════════════════ */
 
-/* Frame container content area */
-.retro-frame-content {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 4px 0;
-  min-height: 20px;
-}
-
-.retro-frame-content > .component-wrapper {
-  flex-shrink: 0;
-}
-
-/* INSPECTOR */
 .inspector {
   width: 260px;
   background: var(--panel-bg);
   border-left: 1px solid var(--border);
   padding: 12px;
   overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .inspector h3 {
@@ -244,21 +335,26 @@ body {
   margin-bottom: 12px;
   border-bottom: 1px solid var(--border);
   padding-bottom: 4px;
+  letter-spacing: 0.05em;
 }
 
 .property-group {
   margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .property-group label {
   display: block;
-  font-size: 10px;
-  margin-bottom: 3px;
+  font-size: 9px;
   color: var(--text-dim);
+  letter-spacing: 0.08em;
 }
 
 .property-group input[type="text"],
 .property-group input[type="email"],
+.property-group input[type="number"],
 .property-group select,
 .property-group textarea {
   width: 100%;
@@ -279,6 +375,8 @@ body {
 
 .property-group input[type="checkbox"] {
   accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
 }
 
 .property-group textarea {
@@ -303,9 +401,108 @@ body {
   background: none;
   cursor: pointer;
   padding: 0;
+  flex-shrink: 0;
 }
 
-/* COMPONENTS */
+/* ═══════════════════════════════════════════════════════════════
+   AUTOLAYOUT PANEL (Inspector cuando hay ROW seleccionada)
+   ═══════════════════════════════════════════════════════════════ */
+
+.autolayout-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.al-section-title {
+  font-size: 9px;
+  color: var(--accent);
+  letter-spacing: 0.12em;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.al-btn-group {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.al-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all 0.1s;
+  flex: 1;
+  min-width: 28px;
+  white-space: nowrap;
+}
+
+.al-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.al-active {
+  background: var(--accent) !important;
+  color: var(--bg) !important;
+  border-color: var(--accent) !important;
+}
+
+/* Preview del layout en el inspector */
+.al-preview {
+  border: 1px solid var(--border);
+  background: var(--selected);
+  padding: 6px;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  margin-top: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   INSPECTOR BUTTONS
+   ═══════════════════════════════════════════════════════════════ */
+
+.inspector-btn {
+  flex: 1;
+  padding: 6px;
+  font-family: monospace;
+  font-size: 11px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+}
+
+.inspector-btn.duplicate {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+.inspector-btn.duplicate:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.inspector-btn.delete {
+  background: #330000;
+  border: 1px solid #ff0000;
+  color: #ff6666;
+}
+
+.inspector-btn.delete:hover {
+  background: #ff0000;
+  color: #000;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENTES RETRO
+   ═══════════════════════════════════════════════════════════════ */
+
 .retro-button {
   background: transparent;
   border: 1px solid var(--text);
@@ -351,6 +548,20 @@ body {
   font-size: 11px;
 }
 
+/* Contenido interno de Frame — también usa flex para los hijos */
+.retro-frame-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 0;
+  min-height: 20px;
+}
+
+.retro-frame-content > .component-wrapper {
+  flex-shrink: 0;
+}
+
 .retro-window {
   border: 2px solid var(--border);
   background: var(--bg);
@@ -370,7 +581,24 @@ body {
   font-size: 12px;
 }
 
-.retro-checkbox, .retro-radio {
+/* Contenido interno de Window */
+.retro-window-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  min-height: 40px;
+  border-bottom: 1px dashed transparent;
+  transition: border-color 0.2s;
+}
+
+.retro-window-content > .component-wrapper {
+  flex-shrink: 0;
+}
+
+.retro-checkbox,
+.retro-radio {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -378,7 +606,8 @@ body {
   white-space: nowrap;
 }
 
-.retro-select, .retro-listbox {
+.retro-select,
+.retro-listbox {
   background: #000;
   border: 1px solid var(--border);
   color: var(--text);
@@ -408,41 +637,17 @@ body {
   padding: 8px;
   border: 1px dashed var(--accent);
   margin: 4px;
+  animation: blink 1s step-end infinite;
 }
 
-/* INSPECTOR BUTTONS */
-.inspector-btn {
-  flex: 1;
-  padding: 6px;
-  font-family: monospace;
-  font-size: 11px;
-  cursor: pointer;
-  border: none;
-  background: transparent;
+@keyframes blink {
+  50% { opacity: 0.4; }
 }
 
-.inspector-btn.duplicate {
-  border: 1px solid var(--accent);
-  color: var(--accent);
-}
+/* ═══════════════════════════════════════════════════════════════
+   STATUS BAR
+   ═══════════════════════════════════════════════════════════════ */
 
-.inspector-btn.duplicate:hover {
-  background: var(--accent);
-  color: var(--bg);
-}
-
-.inspector-btn.delete {
-  background: #330000;
-  border: 1px solid #ff0000;
-  color: #ff6666;
-}
-
-.inspector-btn.delete:hover {
-  background: #ff0000;
-  color: #000;
-}
-
-/* STATUS BAR */
 .status-bar {
   background: var(--panel-bg);
   border-top: 1px solid var(--border);
@@ -453,6 +658,7 @@ body {
   color: var(--text-dim);
   height: 24px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .save-status {
@@ -465,10 +671,15 @@ body {
 
 .save-status.saving {
   color: var(--accent);
+  animation: blink 0.6s step-end infinite;
 }
 
-/* MODALS */
-.projects-overlay, .db-overlay {
+/* ═══════════════════════════════════════════════════════════════
+   MODALES
+   ═══════════════════════════════════════════════════════════════ */
+
+.projects-overlay,
+.db-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -481,7 +692,8 @@ body {
   justify-content: center;
 }
 
-.projects-modal, .db-panel {
+.projects-modal,
+.db-panel {
   background: var(--panel-bg);
   border: 2px solid var(--border);
   width: 90%;
@@ -604,11 +816,14 @@ body {
   color: #000;
 }
 
-/* DATABASE */
+/* ═══════════════════════════════════════════════════════════════
+   DATABASE PANEL
+   ═══════════════════════════════════════════════════════════════ */
+
 .db-tabs {
   display: flex;
   gap: 2px;
-  padding: 8px 20px 8px;
+  padding: 8px 20px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -699,10 +914,12 @@ body {
   border-collapse: collapse;
 }
 
-.db-table th, .db-table td {
+.db-table th,
+.db-table td {
   border: 1px solid var(--border);
   padding: 4px 6px;
   text-align: left;
+  font-size: 11px;
 }
 
 .db-table th {
@@ -710,13 +927,17 @@ body {
   color: var(--accent);
 }
 
-/* Block cursor */
-input, textarea {
+/* ═══════════════════════════════════════════════════════════════
+   INPUTS GLOBALES
+   ═══════════════════════════════════════════════════════════════ */
+
+input,
+textarea {
   caret-shape: block;
   caret-color: var(--accent);
 }
 
-/* No number spinners */
+/* Quitar flechas de number */
 input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
@@ -726,4 +947,22 @@ input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+/* Scrollbar retro */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
 }
