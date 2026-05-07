@@ -1,15 +1,20 @@
 import React from 'react';
 
-function Button({ text = 'Button1', bgColor = 'transparent', textColor = '#00ff00', borderColor = '#00ff00', width = 80, disabled = false }) {
+const getThemeColor = (val, themeVar) => {
+  if (!val || val.toLowerCase() === '#00ff00' || val.toLowerCase() === '#000000' || val === 'transparent') return `var(${themeVar})`;
+  return val;
+};
+
+function Button({ text = 'Button1', bgColor = '', textColor = '', borderColor = '', width = 80, disabled = false }) {
   return (
     <button
       className="retro-button"
       disabled={disabled}
       style={{
-        width: width ? `${width}px` : 'auto',
-        '--button-bg': bgColor,
-        '--button-text': textColor,
-        '--button-border': borderColor,
+        width: typeof width === 'string' && width.includes('%') ? width : (width ? `${width}px` : 'auto'),
+        '--button-bg': bgColor || 'transparent',
+        '--button-text': getThemeColor(textColor, '--text'),
+        '--button-border': getThemeColor(borderColor, '--text'),
       }}
     >
       {text}

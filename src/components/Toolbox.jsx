@@ -19,7 +19,8 @@ const componentes = [
   { type: 'Shape', label: 'Shape' },
   { type: 'Line', label: 'Line' },
   { type: 'Image', label: 'Image' },
-  { type: 'Data', label: 'Data' }
+  { type: 'Data', label: 'Data' },
+  { type: 'Table', label: 'Table' }
 ];
 
 function ToolboxItem({ type, label }) {

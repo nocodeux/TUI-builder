@@ -9,96 +9,132 @@
  * - Wrap
  */
 import React, { useState, useEffect, useCallback } from 'react';
+import IconPicker from './IconPicker';
 
 // ─── Panel AutoLayout (solo para filas) ──────────────────────────────────────
 function AutoLayoutPanel({ layout = {}, onUpdate }) {
+  const [localGap, setLocalGap] = useState(layout.gap ?? 8);
+  const [localP, setLocalP] = useState({
+    T: layout.paddingTop ?? 0,
+    R: layout.paddingRight ?? 0,
+    B: layout.paddingBottom ?? 0,
+    L: layout.paddingLeft ?? 0
+  });
+
+  useEffect(() => {
+    setLocalGap(layout.gap ?? 8);
+    setLocalP({
+      T: layout.paddingTop ?? 0,
+      R: layout.paddingRight ?? 0,
+      B: layout.paddingBottom ?? 0,
+      L: layout.paddingLeft ?? 0
+    });
+  }, [layout]);
+
   const dir = layout.direction || 'row';
-  const gap = layout.gap ?? 8;
   const align = layout.align || 'flex-start';
   const justify = layout.justify || 'flex-start';
   const wrap = layout.wrap || false;
+  const pLinked = layout.paddingLinked !== false;
 
   const AlignBtn = ({ value, icon, field, current }) => (
-    <button
-      className={`al-btn ${current === value ? 'al-active' : ''}`}
-      onClick={() => onUpdate({ [field]: value })}
-      title={value}
-    >
-      {icon}
-    </button>
+    <button className={`al-btn ${current === value ? 'al-active' : ''}`} onClick={() => onUpdate({ [field]: value })} title={value}>{icon}</button>
   );
+
+  const commitPadding = (side, val) => {
+    const v = parseInt(val, 10);
+    if (isNaN(v)) {
+      setLocalP(prev => ({ ...prev, [side]: layout[`padding${side === 'T' ? 'Top' : side === 'R' ? 'Right' : side === 'B' ? 'Bottom' : 'Left'}`] ?? 0 }));
+      return;
+    }
+    if (pLinked) {
+      onUpdate({ paddingTop: v, paddingRight: v, paddingBottom: v, paddingLeft: v });
+    } else {
+      const field = side === 'T' ? 'paddingTop' : side === 'R' ? 'paddingRight' : side === 'B' ? 'paddingBottom' : 'paddingLeft';
+      onUpdate({ [field]: v });
+    }
+  };
+
+  const commitGap = (val) => {
+    const v = parseInt(val, 10);
+    if (!isNaN(v)) onUpdate({ gap: v });
+    else setLocalGap(layout.gap ?? 8);
+  };
 
   return (
     <div className="autolayout-panel">
       <div className="al-section-title">AUTO LAYOUT</div>
-
-      {/* Dirección */}
       <div className="property-group">
-        <label>DIRECCIÓN</label>
+        <label>DIRECTION</label>
         <div className="al-btn-group">
-          <button className={`al-btn ${dir === 'row' ? 'al-active' : ''}`} onClick={() => onUpdate({ direction: 'row' })} title="Horizontal">→ Row</button>
-          <button className={`al-btn ${dir === 'column' ? 'al-active' : ''}`} onClick={() => onUpdate({ direction: 'column' })} title="Vertical">↓ Col</button>
+          <button className={`al-btn ${dir === 'row' ? 'al-active' : ''}`} onClick={() => onUpdate({ direction: 'row' })}>→ Row</button>
+          <button className={`al-btn ${dir === 'column' ? 'al-active' : ''}`} onClick={() => onUpdate({ direction: 'column' })}>↓ Col</button>
         </div>
       </div>
-
-      {/* Gap */}
       <div className="property-group">
         <label>GAP (px)</label>
-        <input
-          type="number" min="0" max="200" value={gap === '' ? '' : gap}
-          onChange={e => {
-            const value = e.target.value;
-            onUpdate({ gap: value === '' ? '' : parseInt(value, 10) || 0 });
-          }}
-          style={{ width: '100%' }}
+        <input 
+          type="text" 
+          inputMode="numeric" 
+          value={localGap}
+          onChange={e => setLocalGap(e.target.value)}
+          onBlur={e => commitGap(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+          style={{ width: '100%' }} 
         />
       </div>
-
-      {/* Align Items (cross-axis) */}
       <div className="property-group">
         <label>{dir === 'row' ? 'ALIGN VERTICAL' : 'ALIGN HORIZONTAL'}</label>
         <div className="al-btn-group">
           <AlignBtn field="align" value="flex-start" current={align} icon={dir === 'row' ? '⬆' : '⬅'} />
-          <AlignBtn field="align" value="center"    current={align} icon="⊕" />
-          <AlignBtn field="align" value="flex-end"  current={align} icon={dir === 'row' ? '⬇' : '➡'} />
-          <AlignBtn field="align" value="stretch"   current={align} icon="↕" />
+          <AlignBtn field="align" value="center" current={align} icon="⊕" />
+          <AlignBtn field="align" value="flex-end" current={align} icon={dir === 'row' ? '⬇' : '➡'} />
+          <AlignBtn field="align" value="stretch" current={align} icon="↕" />
         </div>
       </div>
-
-      {/* Justify Content (main-axis) */}
       <div className="property-group">
         <label>{dir === 'row' ? 'JUSTIFY HORIZONTAL' : 'JUSTIFY VERTICAL'}</label>
         <div className="al-btn-group">
-          <AlignBtn field="justify" value="flex-start"    current={justify} icon="⊢" />
-          <AlignBtn field="justify" value="center"        current={justify} icon="⊙" />
-          <AlignBtn field="justify" value="flex-end"      current={justify} icon="⊣" />
+          <AlignBtn field="justify" value="flex-start" current={justify} icon="⊢" />
+          <AlignBtn field="justify" value="center" current={justify} icon="⊙" />
+          <AlignBtn field="justify" value="flex-end" current={justify} icon="⊣" />
           <AlignBtn field="justify" value="space-between" current={justify} icon="⟺" />
-          <AlignBtn field="justify" value="space-around"  current={justify} icon="↔" />
+          <AlignBtn field="justify" value="space-around" current={justify} icon="↔" />
         </div>
       </div>
-
-      {/* Wrap */}
       <div className="property-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <label style={{ margin: 0 }}>WRAP</label>
         <input type="checkbox" checked={wrap} onChange={e => onUpdate({ wrap: e.target.checked })} />
-        <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{wrap ? 'Sí (multi-línea)' : 'No (una línea)'}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{wrap ? 'On' : 'Off'}</span>
       </div>
-
-      {/* Vista previa del layout */}
+      {/* Padding */}
+      <div className="property-group">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>PADDING
+          <button onClick={() => onUpdate({ paddingLinked: !pLinked })} style={{ background: 'none', border: '1px solid var(--border)', color: pLinked ? 'var(--accent)' : 'var(--text-dim)', cursor: 'pointer', fontSize: 9, padding: '1px 4px', fontFamily: 'monospace' }}>{pLinked ? '🔗' : '⋯'}</button>
+        </label>
+        {pLinked ? (
+          <input 
+            type="text" 
+            inputMode="numeric" 
+            value={localP.T} 
+            onChange={e => { const v = e.target.value; setLocalP({ T: v, R: v, B: v, L: v }); }} 
+            onBlur={e => commitPadding('T', e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+            style={{ width: '100%' }} 
+          />
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+            <div><span style={{ fontSize: 8, color: 'var(--text-dim)' }}>T</span><input type="text" inputMode="numeric" value={localP.T} onChange={e => setLocalP(prev => ({ ...prev, T: e.target.value }))} onBlur={e => commitPadding('T', e.target.value)} onKeyDown={e => e.key === 'Enter' && e.target.blur()} style={{ width: '100%' }} /></div>
+            <div><span style={{ fontSize: 8, color: 'var(--text-dim)' }}>R</span><input type="text" inputMode="numeric" value={localP.R} onChange={e => setLocalP(prev => ({ ...prev, R: e.target.value }))} onBlur={e => commitPadding('R', e.target.value)} onKeyDown={e => e.key === 'Enter' && e.target.blur()} style={{ width: '100%' }} /></div>
+            <div><span style={{ fontSize: 8, color: 'var(--text-dim)' }}>B</span><input type="text" inputMode="numeric" value={localP.B} onChange={e => setLocalP(prev => ({ ...prev, B: e.target.value }))} onBlur={e => commitPadding('B', e.target.value)} onKeyDown={e => e.key === 'Enter' && e.target.blur()} style={{ width: '100%' }} /></div>
+            <div><span style={{ fontSize: 8, color: 'var(--text-dim)' }}>L</span><input type="text" inputMode="numeric" value={localP.L} onChange={e => setLocalP(prev => ({ ...prev, L: e.target.value }))} onBlur={e => commitPadding('L', e.target.value)} onKeyDown={e => e.key === 'Enter' && e.target.blur()} style={{ width: '100%' }} /></div>
+          </div>
+        )}
+      </div>
+      {/* Preview */}
       <div className="al-preview">
-        <div style={{
-          display: 'flex',
-          flexDirection: dir,
-          gap: Math.min(gap, 6),
-          alignItems: align,
-          justifyContent: justify,
-          flexWrap: wrap ? 'wrap' : 'nowrap',
-          width: '100%', height: 40,
-          padding: 4,
-        }}>
-          {[1,2,3].map(i => (
-            <div key={i} style={{ width: 14, height: 14, background: 'var(--accent)', opacity: 0.7, flexShrink: 0 }} />
-          ))}
+        <div style={{ display: 'flex', flexDirection: dir, gap: Math.min(parseInt(localGap, 10) || 0, 6), alignItems: align, justifyContent: justify, flexWrap: wrap ? 'wrap' : 'nowrap', width: '100%', height: 40, padding: 4 }}>
+          {[1,2,3].map(i => (<div key={i} style={{ width: 14, height: 14, background: 'var(--accent)', opacity: 0.7, flexShrink: 0 }} />))}
         </div>
       </div>
     </div>
@@ -106,7 +142,8 @@ function AutoLayoutPanel({ layout = {}, onUpdate }) {
 }
 
 // ─── Inspector principal ──────────────────────────────────────────────────────
-function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows, database }) {
+function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows, database, canvasPadding, onCanvasPaddingChange, selectedId, themeColors = {} }) {
+  const [showIconPicker, setShowIconPicker] = useState(false);
   const [localProps, setLocalProps] = useState({});
 
   useEffect(() => {
@@ -128,16 +165,29 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         <h3>[INSPECTOR]</h3>
         <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: 20, fontSize: 11 }}>
           [ No selection ]<br /><br />
-          [ Click un componente ]<br />
-          [ Click borde de fila = layout ]
+          [ Click a component to edit ]<br />
+          [ Click row border = layout ]
         </div>
         <div className="property-divider" style={{ marginTop: 20 }} />
+        {/* Canvas padding controls */}
+        <div className="al-section-title">CANVAS PADDING</div>
+        {canvasPadding && onCanvasPaddingChange && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 6 }}>
+            {['top','right','bottom','left'].map(side => (
+              <div key={side} className="property-group">
+                <label>{side.toUpperCase()}</label>
+                <input type="number" min="0" max="200" value={canvasPadding[side] ?? 20}
+                  onChange={e => onCanvasPaddingChange({ ...canvasPadding, [side]: parseInt(e.target.value, 10) || 0 })} />
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="property-divider" />
         <div style={{ color: 'var(--text-dim)', fontSize: 10, lineHeight: 1.7 }}>
           <b style={{ color: 'var(--accent)' }}>SHORTCUTS</b><br />
-          Delete — eliminar<br />
-          Ctrl+D — duplicar<br />
-          Drag — reordenar<br />
-          Drop en fila — mover<br />
+          Delete — remove<br />
+          Ctrl+D — duplicate<br />
+          Drag — reorder<br />
         </div>
       </div>
     );
@@ -351,6 +401,25 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         {renderNumber('width','WIDTH (px)','80')}
         {renderNumber('height','HEIGHT (px)','80')}
         <div className="property-group"><label>ALT TEXT</label><input type="text" value={localProps.alt||''} onChange={e => updateAndCommit('alt', e.target.value)} /></div>
+        <div className="property-divider" />
+        <div className="al-section-title">ICON LIBRARY</div>
+        {localProps.iconSrc && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <div dangerouslySetInnerHTML={{ __html: localProps.iconSrc }} style={{ width: 24, height: 24, color: localProps.iconColor || '#00ff00' }} />
+            <button onClick={() => { updateAndCommit('iconSrc', ''); }} style={{ background: 'none', border: '1px solid #ff6666', color: '#ff6666', cursor: 'pointer', fontFamily: 'monospace', fontSize: 9, padding: '2px 6px' }}>Clear</button>
+          </div>
+        )}
+        {renderColor('ICON COLOR', 'iconColor', '#00ff00')}
+        <button onClick={() => setShowIconPicker(true)} style={{ width: '100%', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', padding: '6px', fontFamily: 'monospace', fontSize: 11, cursor: 'pointer', marginTop: 4 }}>
+          {localProps.iconSrc ? 'Change Icon' : 'Browse Icons'}
+        </button>
+        {showIconPicker && (
+          <IconPicker
+            currentIcon=""
+            onSelect={(filename, svg) => { updateAndCommit('iconSrc', svg); setShowIconPicker(false); }}
+            onClose={() => setShowIconPicker(false)}
+          />
+        )}
       </>);
       case 'Timer': return (<>
         {renderNumber('interval','INTERVAL (ms)','1000')}
@@ -373,6 +442,75 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         {renderColor('TEXT COLOR','textColor','#00ff00')}
         {renderColor('BACKGROUND','bgColor','#000000')}
       </>);
+      case 'Table': return (<>
+        {renderNumber('width','WIDTH (px)','400')}
+        {renderNumber('height','HEIGHT (px)','200')}
+        <div className="property-group"><label>SHOW HEADERS</label><input type="checkbox" checked={localProps.showHeaders!==false} onChange={e => updateAndCommit('showHeaders', e.target.checked)} /></div>
+        <div className="property-group"><label>STRIPED ROWS</label><input type="checkbox" checked={localProps.stripedRows!==false} onChange={e => updateAndCommit('stripedRows', e.target.checked)} /></div>
+        {renderColor('TEXT COLOR','textColor','#00ff00')}
+        {renderColor('BORDER COLOR','borderColor','#00ff00')}
+        {renderColor('HEADER BG','headerBgColor','#003300')}
+        <div className="property-divider" />
+        <div className="al-section-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
+          DATA SOURCE
+          <button onClick={() => window.openDatabasePanel?.()} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 9, cursor: 'pointer', textDecoration: 'underline' }}>Manage Data</button>
+        </div>
+        <div className="property-group"><label>SOURCE TYPE</label>
+          <select value={localProps.dataSourceType||'manual'} onChange={e => updateAndCommit('dataSourceType', e.target.value)}>
+            <option value="manual">Manual</option><option value="database">Database Table</option>
+          </select>
+        </div>
+        {localProps.dataSourceType === 'database' && (database?.tables||[]).length > 0 && (
+          <div className="property-group"><label>TABLE</label>
+            <select value={localProps.dataSource||''} onChange={e => updateAndCommit('dataSource', e.target.value)}>
+              <option value="">-- Select --</option>
+              {(database.tables||[]).map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+            </select>
+          </div>
+        )}
+        <div className="property-divider" />
+        <div className="al-section-title">COLUMNS</div>
+        {(localProps.columns||[]).map((col, ci) => (
+          <div key={ci} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+            <input type="text" value={col.name} style={{ flex: 1, fontSize: 10 }}
+              onChange={e => { const cols = [...(localProps.columns||[])]; cols[ci] = { ...cols[ci], name: e.target.value }; updateAndCommit('columns', cols); }} />
+            <input type="text" inputMode="numeric" value={col.width ?? 80} style={{ width: 50, fontSize: 10 }}
+              onChange={e => { 
+                const cols = [...(localProps.columns||[])]; 
+                cols[ci] = { ...cols[ci], width: e.target.value }; 
+                updateAndCommit('columns', cols); 
+              }} 
+              onBlur={e => {
+                const n = parseInt(e.target.value, 10);
+                const cols = [...(localProps.columns||[])];
+                cols[ci] = { ...cols[ci], width: isNaN(n) ? 80 : n };
+                updateAndCommit('columns', cols);
+              }}
+            />
+            <button onClick={() => { const cols = (localProps.columns||[]).filter((_,i)=>i!==ci); updateAndCommit('columns', cols); }}
+              style={{ background: 'none', border: 'none', color: '#ff6666', cursor: 'pointer', fontFamily: 'monospace', fontSize: 11 }}>×</button>
+          </div>
+        ))}
+        <button onClick={() => { const cols = [...(localProps.columns||[]), { name: `Col${(localProps.columns||[]).length+1}`, type: 'text', width: 80 }]; updateAndCommit('columns', cols); }}
+          style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontFamily: 'monospace', fontSize: 10, padding: '3px 8px', width: '100%' }}>+ Add Column</button>
+        <div className="al-section-title">ROWS ({(localProps.rows||[]).length})</div>
+        {(localProps.rows||[]).map((row, ri) => (
+          <div key={ri} style={{ border: '1px solid var(--border)', padding: 4, marginBottom: 4, fontSize: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+              <span style={{ color: 'var(--text-dim)' }}>Row {ri+1}</span>
+              <button onClick={() => { updateAndCommit('rows', (localProps.rows||[]).filter((_,i)=>i!==ri)); }}
+                style={{ background: 'none', border: 'none', color: '#ff6666', cursor: 'pointer', fontFamily: 'monospace', fontSize: 10 }}>×</button>
+            </div>
+            {(localProps.columns||[]).map((col, ci) => (
+              <input key={ci} type="text" value={String(row[col.name]??'')} placeholder={col.name}
+                style={{ width: '100%', marginBottom: 2, fontSize: 10 }}
+                onChange={e => { const rows = [...(localProps.rows||[])]; rows[ri] = { ...rows[ri], [col.name]: e.target.value }; updateAndCommit('rows', rows); }} />
+            ))}
+          </div>
+        ))}
+        <button onClick={() => { const newRow = {}; (localProps.columns||[]).forEach(c => { newRow[c.name] = ''; }); updateAndCommit('rows', [...(localProps.rows||[]), newRow]); }}
+          style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontFamily: 'monospace', fontSize: 10, padding: '3px 8px', width: '100%', marginTop: 4 }}>+ Add Row</button>
+      </>);
       case 'Data': return (<>
         <div className="property-group"><label>TABLE</label>
           <input type="text" value={localProps.tableName||''} onChange={e => updateAndCommit('tableName', e.target.value)} list="table-list-insp" />
@@ -389,6 +527,80 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
       </>);
       default: return <div style={{ color: 'var(--text-dim)' }}>[ Properties not available ]</div>;
     }
+  };
+
+  // Sizing mode panel
+  const sizing = component.props?.sizing;
+  const renderSizingPanel = () => {
+    if (!sizing) return null;
+    return (
+      <>
+        <div className="property-divider" />
+        <div className="al-section-title">SIZING</div>
+        <div className="property-group">
+          <label>WIDTH MODE</label>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <select value={sizing.widthMode || 'fixed'} style={{ flex: 1 }}
+              onChange={e => onUpdate(component.id, { sizing: { ...sizing, widthMode: e.target.value } })}>
+              <option value="fixed">Fixed</option>
+              <option value="fill">Fill Container</option>
+              <option value="hug">Hug Contents</option>
+            </select>
+            <input 
+              type="text" 
+              inputMode="numeric"
+              value={localProps.width ?? component.props.width ?? ''} 
+              disabled={sizing.widthMode !== 'fixed'}
+              style={{ width: 55, opacity: sizing.widthMode !== 'fixed' ? 0.5 : 1 }}
+              onChange={e => updateLocal('width', e.target.value)}
+              onBlur={() => {
+                const n = parseInt(localProps.width, 10);
+                if (!isNaN(n)) commitChange('width', n);
+                else updateLocal('width', component.props.width);
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  const n = parseInt(localProps.width, 10);
+                  if (!isNaN(n)) commitChange('width', n);
+                  e.target.blur();
+                }
+              }}
+            />
+          </div>
+        </div>
+        <div className="property-group">
+          <label>HEIGHT MODE</label>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <select value={sizing.heightMode || 'hug'} style={{ flex: 1 }}
+              onChange={e => onUpdate(component.id, { sizing: { ...sizing, heightMode: e.target.value } })}>
+              <option value="fixed">Fixed</option>
+              <option value="fill">Fill Container</option>
+              <option value="hug">Hug Contents</option>
+            </select>
+            <input 
+              type="text" 
+              inputMode="numeric"
+              value={localProps.height ?? component.props.height ?? ''} 
+              disabled={sizing.heightMode !== 'fixed'}
+              style={{ width: 55, opacity: sizing.heightMode !== 'fixed' ? 0.5 : 1 }}
+              onChange={e => updateLocal('height', e.target.value)}
+              onBlur={() => {
+                const n = parseInt(localProps.height, 10);
+                if (!isNaN(n)) commitChange('height', n);
+                else updateLocal('height', component.props.height);
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  const n = parseInt(localProps.height, 10);
+                  if (!isNaN(n)) commitChange('height', n);
+                  e.target.blur();
+                }
+              }}
+            />
+          </div>
+        </div>
+      </>
+    );
   };
 
   return (
@@ -409,6 +621,7 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         </>
       )}
       {renderProps()}
+      {renderSizingPanel()}
       <div className="property-divider" />
       <div style={{ display: 'flex', gap: 4 }}>
         <button className="inspector-btn duplicate" onClick={onDuplicate}>Duplicate</button>

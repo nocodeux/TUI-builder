@@ -6,6 +6,8 @@ function Row({
   children,
   onAddChild,
   onMoveChild,
+  width = '100%',
+  height = 'auto',
 }) {
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ['COMPONENT', 'EXISTING_COMPONENT'],
@@ -21,6 +23,12 @@ function Row({
     collect: (monitor) => ({ isOver: !!monitor.isOver({ shallow: true }) })
   }), [onAddChild, onMoveChild]);
 
+  const fmtDim = (val) => {
+    if (!val || val === 'auto') return 'auto';
+    if (typeof val === 'string' && (val.includes('%') || val.includes('vw') || val.includes('vh'))) return val;
+    return `${val}px`;
+  };
+
   return (
     <div
       ref={drop}
@@ -32,6 +40,13 @@ function Row({
         alignItems: layout.align,
         justifyContent: layout.justify,
         flexWrap: layout.wrap ? 'wrap' : 'nowrap',
+        paddingTop: layout.paddingTop ?? 0,
+        paddingRight: layout.paddingRight ?? 0,
+        paddingBottom: layout.paddingBottom ?? 0,
+        paddingLeft: layout.paddingLeft ?? 0,
+        width: fmtDim(width),
+        height: fmtDim(height),
+        minHeight: (height === 'auto' || !height) ? '24px' : fmtDim(height),
       }}
     >
       {children}

@@ -27,12 +27,47 @@ const THEMES = {
   'theme-amber': { name: 'Amber', bg: '#0a0800', panelBg: '#0d0a00', border: '#aa7700', text: '#ffb000', textDim: '#886600', accent: '#ffcc00', selected: '#332200' }
 };
 
-const DEFAULT_LAYOUT = { direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false };
+const DEFAULT_LAYOUT = {
+  direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false,
+  paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0, paddingLinked: true,
+};
 
 const mkId = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
 
 function App() {
   const [rows, setRows] = useState([]);           // [ { id, layout, children } ]
+
+  // ── Color Migration for Existing Components ──────────────────────────────
+  useEffect(() => {
+    const cleanProps = (props) => {
+      const next = { ...props };
+      const targets = ['textColor', 'borderColor', 'bgColor', 'color', 'thumbColor', 'iconColor'];
+      targets.forEach(key => {
+        const val = String(next[key] || '').toLowerCase();
+        // If it matches the old hardcoded defaults, clear it so it uses the theme variables
+        if (val === '#00ff00' || val === '#000000' || val === 'transparent' || val === 'rgba(0,0,0,0)') {
+           next[key] = '';
+        }
+      });
+      return next;
+    };
+
+    const cleanComps = (comps) => comps.map(c => ({
+      ...c,
+      props: cleanProps(c.props),
+      children: c.children ? cleanComps(c.children) : []
+    }));
+
+    const cleanRows = (rs) => rs.map(r => ({
+      ...r,
+      props: r.props ? cleanProps(r.props) : {},
+      children: r.children ? cleanComps(r.children) : []
+    }));
+
+    // Perform one-time migration of existing rows to remove hardcoded green/black defaults
+    setRows(prev => cleanRows(prev));
+  }, []);
+
   const [selectedId, setSelectedId] = useState(null);
   const [viewMode, setViewMode] = useState('desktop');
   const [theme, setTheme] = useState(() => localStorage.getItem('nanostudio_theme') || 'theme-nano');
@@ -45,28 +80,49 @@ function App() {
   const [saveStatus, setSaveStatus] = useState('');
   const [activeWindow, setActiveWindow] = useState(null);
   const [database, setDatabase] = useState({ tables: [], data: {} });
+  const [canvasPadding, setCanvasPadding] = useState({ top: 20, right: 20, bottom: 20, left: 20 });
 
   // ── Defaults por tipo ────────────────────────────────────────────────────
   const getDefaultProps = type => ({
-    Window: { title: 'Window1', width: 400, height: '', bgColor: '', textColor: '', borderColor: '', layout: { ...DEFAULT_LAYOUT } },
-    Frame: { title: 'Frame1', width: 300, height: '', borderStyle: 'single', bgColor: '', textColor: '', borderColor: '', layout: { ...DEFAULT_LAYOUT } },
-    Row: { layout: { ...DEFAULT_LAYOUT } },
-    Button: { text: 'Button1', bgColor: 'transparent', textColor: '#00ff00', borderColor: '#00ff00', width: 80, disabled: false },
-    Label: { text: 'Label1', textColor: '#00ff00', fontSize: 12, alignment: 'left', linkUrl: '' },
-    Input: { placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '#00ff00', borderColor: '#00ff00', bgColor: '#000000', inputType: 'text' },
-    TextBox: { placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '#00ff00', borderColor: '#00ff00', bgColor: '#000000', inputType: 'text' },
-    CheckBox: { text: 'CheckBox1', checked: false, textColor: '#00ff00' },
-    RadioButton: { text: 'Option1', checked: false, group: 'group1', textColor: '#00ff00' },
-    ComboBox: { items: ['Option 1', 'Option 2', 'Option 3'], width: 150, selectedIndex: 0, textColor: '#00ff00', borderColor: '#00ff00', bgColor: '#000000' },
-    ListBox: { items: ['Item 1', 'Item 2', 'Item 3'], width: 150, height: 100, multiSelect: false, textColor: '#00ff00', borderColor: '#00ff00', bgColor: '#000000' },
-    HScrollBar: { value: 50, min: 0, max: 100, width: 150, bgColor: '#000000', thumbColor: '#00ff00' },
-    VScrollBar: { value: 50, min: 0, max: 100, height: 100, bgColor: '#000000', thumbColor: '#00ff00' },
-    Timer: { interval: 1000, enabled: false },
-    PictureBox: { width: 150, height: 100, stretch: false, border: true, borderColor: '' },
-    Shape: { shapeType: 'rectangle', width: 60, height: 40, borderColor: '#00ff00', bgColor: 'transparent', fill: false },
-    Line: { color: '#00ff00', thickness: 1, fullWidth: true, widthPercent: 100 },
-    Image: { src: '', width: 80, height: 80, alt: 'Image' },
-    Data: { tableName: '', dataSource: 'sqlite', query: '' }
+    Window: { title: 'Window1', width: 400, height: '', bgColor: '', textColor: '', borderColor: '', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
+    Frame: { title: 'Frame1', width: 300, height: '', borderStyle: 'single', bgColor: '', textColor: '', borderColor: '', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
+    Row: { layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fill', heightMode: 'hug' } },
+    Button: { text: 'Button1', bgColor: '', textColor: '', borderColor: '', width: 80, disabled: false, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
+    Label: { text: 'Label1', textColor: '', fontSize: 12, alignment: 'left', linkUrl: '', sizing: { widthMode: 'hug', heightMode: 'hug' } },
+    Input: { placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '', borderColor: '', bgColor: '', inputType: 'text', sizing: { widthMode: 'fixed', heightMode: 'hug' } },
+    TextBox: { placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '', borderColor: '', bgColor: '', inputType: 'text', sizing: { widthMode: 'fixed', heightMode: 'hug' } },
+    CheckBox: { text: 'CheckBox1', checked: false, textColor: '', sizing: { widthMode: 'hug', heightMode: 'hug' } },
+    RadioButton: { text: 'Option1', checked: false, group: 'group1', textColor: '', sizing: { widthMode: 'hug', heightMode: 'hug' } },
+    ComboBox: { items: ['Option 1', 'Option 2', 'Option 3'], width: 150, selectedIndex: 0, textColor: '', borderColor: '', bgColor: '', sizing: { widthMode: 'fixed', heightMode: 'hug' } },
+    ListBox: { items: ['Item 1', 'Item 2', 'Item 3'], width: 150, height: 100, multiSelect: false, textColor: '', borderColor: '', bgColor: '', sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
+    HScrollBar: { value: 50, min: 0, max: 100, width: 150, bgColor: '', thumbColor: '', sizing: { widthMode: 'fixed', heightMode: 'hug' } },
+    VScrollBar: { value: 50, min: 0, max: 100, height: 100, bgColor: '', thumbColor: '', sizing: { widthMode: 'hug', heightMode: 'fixed' } },
+    Timer: { interval: 1000, enabled: false, sizing: { widthMode: 'hug', heightMode: 'hug' } },
+    PictureBox: { width: 150, height: 100, stretch: false, border: true, borderColor: '', sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
+    Shape: { shapeType: 'rectangle', width: 60, height: 40, borderColor: '', bgColor: '', fill: false, sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
+    Line: { color: '', thickness: 1, fullWidth: true, widthPercent: 100, sizing: { widthMode: 'fill', heightMode: 'hug' } },
+    Image: { src: '', width: 80, height: 80, alt: 'Image', iconSrc: '', iconColor: '', sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
+    Table: {
+      columns: [
+        { name: 'ID', type: 'number', width: 60 },
+        { name: 'Name', type: 'text', width: 120 },
+        { name: 'Status', type: 'text', width: 80 },
+      ],
+      rows: [
+        { ID: 1, Name: 'Item 1', Status: 'Active' },
+      ],
+      width: 400,
+      height: 200,
+      showHeaders: true,
+      stripedRows: true,
+      borderColor: '',
+      textColor: '',
+      headerBgColor: '',
+      dataSource: '',
+      dataSourceType: 'manual',
+      sizing: { widthMode: 'fixed', heightMode: 'fixed' },
+    },
+    Data: { tableName: '', dataSource: 'sqlite', query: '', sizing: { widthMode: 'hug', heightMode: 'hug' } }
   }[type] || { text: type });
 
   const mkComp = type => {
@@ -100,9 +156,21 @@ function App() {
   const updateCompRecursive = (comps, id, newProps) =>
     comps.map(c => {
       if (c.id === id) {
-        const layoutKeys = ['direction', 'gap', 'align', 'justify', 'wrap'];
+        const layoutKeys = ['direction', 'gap', 'align', 'justify', 'wrap', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'paddingLinked'];
         const hasLayoutKeys = Object.keys(newProps).some(key => layoutKeys.includes(key));
-        const nextProps = { ...c.props, ...newProps };
+        const nextProps = { ...c.props };
+
+        // Handle sizing updates
+        if (newProps.sizing) {
+          nextProps.sizing = { ...(c.props?.sizing || {}), ...newProps.sizing };
+        }
+
+        // Copy non-layout, non-sizing props
+        Object.keys(newProps).forEach(key => {
+          if (!layoutKeys.includes(key) && key !== 'sizing') {
+            nextProps[key] = newProps[key];
+          }
+        });
 
         if (hasLayoutKeys) {
           nextProps.layout = {
@@ -240,6 +308,20 @@ function App() {
       };
     }
 
+    const cleanColor = (val) => {
+      if (!val) return '';
+      const low = String(val).toLowerCase();
+      if (low === '#00ff00' || low === '#000000' || low === 'transparent' || low === 'rgba(0,0,0,0)') return '';
+      return val;
+    };
+
+    const colorKeys = ['textColor', 'borderColor', 'bgColor', 'color', 'thumbColor', 'iconColor'];
+    colorKeys.forEach(k => {
+      if (normalizedProps[k] !== undefined) {
+        normalizedProps[k] = cleanColor(normalizedProps[k]);
+      }
+    });
+
     return {
       ...comp,
       type: canonicalType,
@@ -323,7 +405,7 @@ function App() {
   const updateComponent = useCallback((id, newProps) => {
     setRows(prev => prev.map(row => {
       if (row.id === id) {
-        // Es una fila — actualizar su layout
+        // It's a row — update its layout (includes padding now)
         return { ...row, layout: { ...(row.layout || DEFAULT_LAYOUT), ...newProps } };
       }
       return { ...row, children: updateCompRecursive(row.children, id, newProps) };
@@ -485,52 +567,92 @@ function App() {
     alignItems: layout.align || 'flex-start',
     justifyContent: layout.justify || 'flex-start',
     flexWrap: layout.wrap ? 'wrap' : 'nowrap',
+    paddingTop: layout.paddingTop ? `${layout.paddingTop}px` : undefined,
+    paddingRight: layout.paddingRight ? `${layout.paddingRight}px` : undefined,
+    paddingBottom: layout.paddingBottom ? `${layout.paddingBottom}px` : undefined,
+    paddingLeft: layout.paddingLeft ? `${layout.paddingLeft}px` : undefined,
   });
+
+  const getThemeColor = (val, themeVar) => {
+    if (!val) return `var(${themeVar})`;
+    const low = String(val).toLowerCase();
+    if (low === '#00ff00' || low === '#000000' || low === 'transparent') return `var(${themeVar})`;
+    return val;
+  };
 
   const renderComponentExport = (comp) => {
     const p = comp.props || {};
+    const isWidthFill = p.sizing?.widthMode === 'fill';
+    const isHeightFill = p.sizing?.heightMode === 'fill';
     const renderChildren = () => (comp.children || []).map(renderComponentExport).join('');
-    const wrapComponent = (innerHtml) => `<div class="component-wrapper" style="display:inline-flex;align-items:flex-start;padding:2px;flex-shrink:0;box-sizing:border-box;max-width:100%;outline:none;border:1px solid transparent;cursor:default;">${innerHtml}</div>`;
+
+    const wrapComponent = (innerHtml) => {
+      const wrapperStyle = {
+        display: (isWidthFill || isHeightFill) ? 'flex' : 'inline-flex',
+        flex: isWidthFill ? '1 1 0%' : '0 0 auto',
+        alignSelf: (isWidthFill || isHeightFill) ? 'stretch' : 'auto',
+        minWidth: 0,
+        minHeight: 0,
+        boxSizing: 'border-box',
+        maxWidth: '100%',
+      };
+      return `<div class="export-wrapper" style="${styleObjToString(wrapperStyle)}">${innerHtml}</div>`;
+    };
 
     switch (comp.type) {
       case 'Window': {
+        const layoutStyles = layoutToStyles(p.layout);
+        const paddedStyles = {
+          ...layoutStyles,
+          paddingTop: `${(parseInt(p.layout?.paddingTop) || 0) + 12}px`,
+          paddingRight: `${(parseInt(p.layout?.paddingRight) || 0) + 12}px`,
+          paddingBottom: `${(parseInt(p.layout?.paddingBottom) || 0) + 12}px`,
+          paddingLeft: `${(parseInt(p.layout?.paddingLeft) || 0) + 12}px`,
+        };
         const html = `<div class="retro-window" style="${styleObjToString({
-          width: p.width ? `${p.width}px` : '100%',
-          minHeight: p.height ? `${p.height}px` : '',
-          background: p.bgColor || 'transparent',
-          borderColor: p.borderColor || THEMES[theme].border,
-        })}"><div class="retro-window-titlebar"><span class="retro-window-title" style="color:${p.textColor || THEMES[theme].accent}">${escapeHtml(p.title)}</span></div><div class="retro-window-content" style="${styleObjToString(layoutToStyles(p.layout))}">${renderChildren()}</div></div>`;
+          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '100%'),
+          minHeight: isHeightFill ? '100%' : (p.height ? `${p.height}px` : ''),
+          height: isHeightFill ? '100%' : 'auto',
+          background: getThemeColor(p.bgColor, '--bg'),
+          borderColor: getThemeColor(p.borderColor, '--border'),
+        })}"><div class="retro-window-titlebar"><span class="retro-window-title" style="color:${getThemeColor(p.textColor, '--accent')}">${escapeHtml(p.title)}</span></div><div class="retro-window-content" style="${styleObjToString(paddedStyles)}">${renderChildren()}</div></div>`;
         return wrapComponent(html);
       }
       case 'Frame': {
         const borderValue = p.borderStyle === 'double' ? '3px double' : p.borderStyle === 'dashed' ? '1px dashed' : '1px solid';
-        const html = `<div class="retro-frame-wrapper" style="${styleObjToString({ width: p.width ? `${p.width}px` : '100%' })}"><fieldset class="retro-frame" style="${styleObjToString({
-          border: `${borderValue} ${p.borderColor || THEMES[theme].border}`,
+        const html = `<div class="retro-frame-wrapper" style="${styleObjToString({ 
+          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '100%'),
+          height: isHeightFill ? '100%' : 'auto',
+        })}"><fieldset class="retro-frame" style="${styleObjToString({
+          border: `${borderValue} ${getThemeColor(p.borderColor, '--border')}`,
           background: p.bgColor || 'transparent',
-          minHeight: p.height ? `${p.height}px` : 'auto',
-        })}"><legend style="color:${p.textColor || THEMES[theme].accent}">${escapeHtml(p.title)}</legend><div class="retro-frame-content" style="${styleObjToString(layoutToStyles(p.layout))}">${renderChildren()}</div></fieldset></div>`;
+          minHeight: isHeightFill ? '100%' : (p.height ? `${p.height}px` : 'auto'),
+          height: isHeightFill ? '100%' : 'auto',
+        })}"><legend style="color:${getThemeColor(p.textColor, '--accent')}">${escapeHtml(p.title)}</legend><div class="retro-frame-content" style="${styleObjToString(layoutToStyles(p.layout))}">${renderChildren()}</div></fieldset></div>`;
         return wrapComponent(html);
       }
       case 'Row': {
         const html = `<div class="retro-row" style="${styleObjToString({
           ...layoutToStyles(p.layout),
-          width: '100%',
-          minHeight: '32px',
+          width: isWidthFill ? '100%' : (p.width ? (typeof p.width === 'string' ? p.width : `${p.width}px`) : '100%'),
+          minHeight: isHeightFill ? '100%' : (p.height ? (typeof p.height === 'string' ? p.height : `${p.height}px`) : '32px'),
+          height: isHeightFill ? '100%' : 'auto',
         })}">${renderChildren()}</div>`;
         return wrapComponent(html);
       }
       case 'Button':
         return wrapComponent(`<button class="retro-button" style="${styleObjToString({
-          width: p.width ? `${p.width}px` : 'auto',
+          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : 'auto'),
+          height: isHeightFill ? '100%' : 'auto',
           '--button-bg': p.bgColor || 'transparent',
-          '--button-text': p.textColor || THEMES[theme].text,
-          '--button-border': p.borderColor || THEMES[theme].text,
+          '--button-text': getThemeColor(p.textColor, '--text'),
+          '--button-border': getThemeColor(p.borderColor, '--text'),
         })}" ${p.disabled ? 'disabled' : ''}>${escapeHtml(p.text)}</button>`);
       case 'Label': {
         const textAlign = p.alignment || 'left';
         const content = p.linkUrl
-          ? `<a href="${escapeHtml(p.linkUrl)}" target="_blank" rel="noopener noreferrer" style="color:${p.textColor || THEMES[theme].text};text-decoration:underline;">${escapeHtml(p.text)}</a>`
-          : `<span style="color:${p.textColor || THEMES[theme].text};">${escapeHtml(p.text)}</span>`;
+          ? `<a href="${escapeHtml(p.linkUrl)}" target="_blank" rel="noopener noreferrer" style="color:${getThemeColor(p.textColor, '--text')};text-decoration:underline;">${escapeHtml(p.text)}</a>`
+          : `<span style="color:${getThemeColor(p.textColor, '--text')};">${escapeHtml(p.text)}</span>`;
         return wrapComponent(`<label class="retro-label" style="${styleObjToString({
           fontSize: p.fontSize || 12,
           textAlign,
@@ -540,32 +662,34 @@ function App() {
       case 'Input':
       case 'TextBox':
         return wrapComponent(`<input class="retro-textbox" type="${p.inputType || 'text'}" placeholder="${escapeHtml(p.placeholder)}" style="${styleObjToString({
-          width: p.width ? `${p.width}px` : '100%',
-          borderColor: p.borderColor || THEMES[theme].text,
-          color: p.textColor || THEMES[theme].text,
-          background: p.bgColor || THEMES[theme].inputBg,
-        })}" ${p.readOnly ? 'readonly' : ''} ${p.disabled ? 'disabled' : ''} />`);
+          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '100%'),
+          height: isHeightFill ? '100%' : 'auto',
+          borderColor: getThemeColor(p.borderColor, '--text'),
+          color: getThemeColor(p.textColor, '--text'),
+          background: getThemeColor(p.bgColor, '--input-bg'),
+        })}" ${p.readOnly ? '' : ''} ${p.disabled ? '' : ''} />`);
       case 'CheckBox':
-        return wrapComponent(`<label class="retro-checkbox" style="color:${p.textColor || THEMES[theme].text};"><input type="checkbox" ${p.checked ? 'checked' : ''} disabled /><span>${escapeHtml(p.text)}</span></label>`);
+        return wrapComponent(`<label class="retro-checkbox" style="color:${getThemeColor(p.textColor, '--text')};"><input type="checkbox" ${p.checked ? 'checked' : ''} /><span>${escapeHtml(p.text)}</span></label>`);
       case 'RadioButton':
-        return wrapComponent(`<label class="retro-radio" style="color:${p.textColor || THEMES[theme].text};"><input type="radio" name="${escapeHtml(p.group || 'group1')}" ${p.checked ? 'checked' : ''} disabled /><span>${escapeHtml(p.text)}</span></label>`);
+        return wrapComponent(`<label class="retro-radio" style="color:${getThemeColor(p.textColor, '--text')};"><input type="radio" name="${escapeHtml(p.group || 'group1')}" ${p.checked ? 'checked' : ''} /><span>${escapeHtml(p.text)}</span></label>`);
       case 'ComboBox': {
-        const items = (p.items || []).map(item => `<option>${escapeHtml(item)}</option>`).join('');
-        return wrapComponent(`<select class="retro-select" disabled style="${styleObjToString({
-          width: p.width ? `${p.width}px` : '150px',
-          borderColor: p.borderColor || THEMES[theme].border,
-          color: p.textColor || THEMES[theme].text,
-          background: p.bgColor || '#000000',
+        const items = (p.items || []).map(item => `<option ${item === p.value ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('');
+        return wrapComponent(`<select class="retro-select" style="${styleObjToString({
+          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '150px'),
+          height: isHeightFill ? '100%' : 'auto',
+          borderColor: getThemeColor(p.borderColor, '--border'),
+          color: getThemeColor(p.textColor, '--text'),
+          background: getThemeColor(p.bgColor, '--bg'),
         })}">${items}</select>`);
       }
       case 'ListBox': {
-        const items = (p.items || []).map(item => `<option>${escapeHtml(item)}</option>`).join('');
-        return wrapComponent(`<select class="retro-listbox" disabled multiple size="4" style="${styleObjToString({
-          width: p.width ? `${p.width}px` : '150px',
-          height: p.height ? `${p.height}px` : '100px',
-          borderColor: p.borderColor || THEMES[theme].border,
-          color: p.textColor || THEMES[theme].text,
-          background: p.bgColor || '#000000',
+        const items = (p.items || []).map(item => `<option ${item === p.value ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('');
+        return wrapComponent(`<select class="retro-listbox" ${p.multiSelect ? 'multiple' : ''} size="4" style="${styleObjToString({
+          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '150px'),
+          height: isHeightFill ? '100%' : (p.height ? `${p.height}px` : '100px'),
+          borderColor: getThemeColor(p.borderColor, '--border'),
+          color: getThemeColor(p.textColor, '--text'),
+          background: getThemeColor(p.bgColor, '--bg'),
         })}">${items}</select>`);
       }
       case 'HScrollBar':
@@ -574,8 +698,8 @@ function App() {
         const barStyle = styleObjToString({
           width: isVertical ? '16px' : (p.width ? `${p.width}px` : '150px'),
           height: isVertical ? (p.height ? `${p.height}px` : '100px') : '16px',
-          background: p.bgColor || '#000000',
-          border: `1px solid ${THEMES[theme].border}`,
+          background: getThemeColor(p.bgColor, '--bg'),
+          border: `1px solid var(--border)`,
           display: 'flex',
           alignItems: 'stretch',
           justifyContent: 'flex-start',
@@ -583,23 +707,24 @@ function App() {
         const thumbStyle = styleObjToString({
           width: isVertical ? '100%' : `${p.value || 50}%`,
           height: isVertical ? `${p.value || 50}%` : '100%',
-          background: p.thumbColor || THEMES[theme].text,
+          background: getThemeColor(p.thumbColor, '--text'),
           opacity: 0.5,
         });
         return wrapComponent(`<div class="retro-scrollbar" style="${barStyle}"><div style="${thumbStyle}"></div></div>`);
       }
       case 'PictureBox':
         return wrapComponent(`<div class="retro-picturebox" style="${styleObjToString({
-          width: p.width ? `${p.width}px` : '150px',
-          minHeight: p.height ? `${p.height}px` : '100px',
-          border: p.border ? `1px solid ${p.borderColor || THEMES[theme].border}` : 'none',
+          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '150px'),
+          minHeight: isHeightFill ? '100%' : (p.height ? `${p.height}px` : '100px'),
+          height: isHeightFill ? '100%' : 'auto',
+          border: p.border ? `1px solid ${getThemeColor(p.borderColor, '--border')}` : 'none',
         })}">${renderChildren()}</div>`);
       case 'Shape':
         return wrapComponent(`<div style="${styleObjToString({
-          width: p.width ? `${p.width}px` : '60px',
-          height: p.height ? `${p.height}px` : '40px',
-          background: p.fill ? p.bgColor || THEMES[theme].text : 'transparent',
-          border: `1px solid ${p.borderColor || THEMES[theme].text}`,
+          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '60px'),
+          height: isHeightFill ? '100%' : (p.height ? `${p.height}px` : '40px'),
+          background: p.fill ? getThemeColor(p.bgColor, '--text') : 'transparent',
+          border: `1px solid ${getThemeColor(p.borderColor, '--text')}`,
           borderRadius: p.shapeType === 'circle' ? '50%' : '0',
           display: 'inline-block',
         })}"></div>`);
@@ -607,28 +732,48 @@ function App() {
         return wrapComponent(`<div style="${styleObjToString({
           width: p.fullWidth ? `${p.widthPercent || 100}%` : '100px',
           height: `${p.thickness || 1}px`,
-          background: p.color || THEMES[theme].text,
+          background: getThemeColor(p.color, '--text'),
           margin: '4px 0'
         })}"></div>`);
       case 'Image':
         if (p.src) {
           return wrapComponent(`<img src="${escapeHtml(p.src)}" alt="${escapeHtml(p.alt)}" style="${styleObjToString({
-            width: p.width ? `${p.width}px` : '80px',
-            height: p.height ? `${p.height}px` : '80px',
-            border: `1px solid ${THEMES[theme].border}`
+            width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '80px'),
+            height: isHeightFill ? '100%' : (p.height ? `${p.height}px` : '80px'),
+            border: `1px solid var(--border)`
           })}" />`);
         }
+        if (p.iconSrc) {
+          return wrapComponent(`<div class="image-icon-render" style="${styleObjToString({
+            width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '80px'),
+            height: isHeightFill ? '100%' : (p.height ? `${p.height}px` : '80px'),
+            border: `1px solid var(--border)`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'var(--bg)',
+            color: getThemeColor(p.iconColor, '--text'),
+            padding: '4px',
+          })}">${p.iconSrc}</div>`);
+        }
         return wrapComponent(`<div style="${styleObjToString({
-          width: p.width ? `${p.width}px` : '80px',
-          height: p.height ? `${p.height}px` : '80px',
-          border: `1px solid ${THEMES[theme].border}`,
+          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '80px'),
+          height: isHeightFill ? '100%' : (p.height ? `${p.height}px` : '80px'),
+          border: `1px solid var(--border)`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: THEMES[theme].bg,
-        })}"><span style="font-size:10px;color:${THEMES[theme].textDim};">[IMG ${p.width || 80}x${p.height || 80}]</span></div>`);
+          background: 'var(--bg)',
+        })}"><span style="font-size:10px;color:var(--text-dim);">[IMG ${p.width || 80}x${p.height || 80}]</span></div>`);
       case 'Data':
-        return wrapComponent(`<div class="retro-data" style="font-size:11px;color:${THEMES[theme].textDim};padding:4px 8px;border:1px dashed ${THEMES[theme].border};">[DATA] Table: ${escapeHtml(p.tableName || 'none')} | Source: ${escapeHtml(p.dataSource || 'sqlite')}${p.query ? `<div style="font-size:9px;margin-top:2px;">${p.dataSource === 'sqlite' ? 'Query' : p.dataSource === 'json' ? 'JSON Path' : 'API URL'}: ${escapeHtml(p.query)}</div>` : ''}</div>`);
+        return wrapComponent(`<div class="retro-data" style="font-size:11px;color:var(--text-dim);padding:4px 8px;border:1px dashed var(--border);">[DATA] Table: ${escapeHtml(p.tableName || 'none')} | Source: ${escapeHtml(p.dataSource || 'sqlite')}${p.query ? `<div style="font-size:9px;margin-top:2px;">${p.dataSource === 'sqlite' ? 'Query' : p.dataSource === 'json' ? 'JSON Path' : 'API URL'}: ${escapeHtml(p.query)}</div>` : ''}</div>`);
+      case 'Table': {
+        const cols = p.columns || [];
+        const trows = p.rows || [];
+        const thRow = p.showHeaders !== false ? `<tr>${cols.map(c => `<th style="border:1px solid ${getThemeColor(p.borderColor, '--border')};padding:4px 8px;font-size:11px;background:${p.headerBgColor || 'var(--selected)'};color:${getThemeColor(p.textColor, '--accent')};">${escapeHtml(c.name)}</th>`).join('')}</tr>` : '';
+        const tbRows = trows.map((r, ri) => `<tr style="background:${p.stripedRows && ri % 2 === 1 ? 'rgba(255,255,255,0.03)' : 'transparent'}">${cols.map(c => `<td style="border:1px solid ${getThemeColor(p.borderColor, '--border')};padding:4px 8px;font-size:11px;color:${getThemeColor(p.textColor, '--text')};">${escapeHtml(String(r[c.name] ?? '')) || '&nbsp;'}</td>`).join('')}</tr>`).join('');
+        return wrapComponent(`<div style="${styleObjToString({ width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '100%'), maxHeight: isHeightFill ? '100%' : (p.height ? `${p.height}px` : 'auto'), height: isHeightFill ? '100%' : 'auto', overflow: 'auto' })}"><table style="width:100%;border-collapse:collapse;">${thRow ? `<thead>${thRow}</thead>` : ''}<tbody>${tbRows}</tbody></table></div>`);
+      }
       default:
         return wrapComponent(`<div style="${styleObjToString({ color: THEMES[theme].text, background: 'transparent', padding: '6px' })}">[${escapeHtml(comp.type)}]</div>`);
     }
@@ -651,15 +796,50 @@ function App() {
       margin: '12px 0',
     })}">${(row.children || []).map(renderComponentExport).join('')}</div>`).join('');
 
+    const dotColor = (t.accent || '#00aa00').replace('#', '%23');
     const css = `${appCss}
-body { overflow: auto !important; min-height: 100vh; background: ${t.bg}; color: ${t.text}; }
-.canvas { width: min(100%, 900px); max-width: 900px; margin: 0 auto; background-color: ${t.bg}; background-image: url("data:image/svg+xml,%3Csvg width='8' height='8' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='0' y='0' width='2' height='2' fill='%2300aa00' opacity='0.08'/%3E%3Crect x='4' y='4' width='2' height='2' fill='%2300aa00' opacity='0.08'/%3E%3C/svg%3E"); background-size: 8px 8px; background-repeat: repeat; }
-.canvas.mobile { width: 100%; max-width: 420px; }
-.canvas.mobile .preview-area { max-width: 420px; margin: 0 auto; width: 100%; }
-.preview-area { min-width: 0; }
-.layout-row, .component-wrapper, .retro-window, .retro-window-content, .retro-frame, .retro-frame-content, .retro-row { min-width: 0; }
-.component-wrapper > * { max-width: 100%; }
-.drop-zone, .new-row-drop { display: none !important; }
+body { 
+  overflow: auto !important; 
+  min-height: 100vh; 
+  background: ${t.bg}; 
+  color: ${t.text}; 
+  margin: 0; 
+  padding: 0; 
+  background-image: url("data:image/svg+xml,%3Csvg width='8' height='8' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='0' y='0' width='2' height='2' fill='${dotColor}' opacity='0.08'/%3E%3Crect x='4' y='4' width='2' height='2' fill='${dotColor}' opacity='0.08'/%3E%3C/svg%3E");
+  background-size: 8px 8px;
+  background-repeat: repeat;
+}
+.canvas { 
+  width: 100%; 
+  margin: 0; 
+  display: flex; 
+  flex-direction: column; 
+  background: transparent !important; 
+  border: none !important; 
+}
+.canvas.mobile { 
+  max-width: 420px; 
+  margin: 0 auto; 
+  background: transparent !important; 
+  border: none !important;
+}
+.preview-area { 
+  min-width: 0; 
+  width: 100%; 
+  flex: 1; 
+  background: transparent !important; 
+}
+.layout-row, .retro-row, .export-wrapper { 
+  background: transparent !important; 
+  border: none !important; 
+}
+.retro-window, .retro-frame {
+  background: ${t.bg} !important;
+}
+.layout-row, .export-wrapper, .retro-window, .retro-window-content, .retro-frame, .retro-frame-content, .retro-row { min-width: 0; }
+.export-wrapper > * { max-width: 100%; }
+.export-wrapper { padding: 0 !important; border: none !important; outline: none !important; }
+.drop-zone, .new-row-drop, .drop-indicator { display: none !important; }
 `;
 
     const html = `<!DOCTYPE html>
@@ -694,6 +874,11 @@ ${rowsHtml}
     setDatabase({ tables: [], data: {} });
     setShowProjects(false);
   };
+
+  useEffect(() => {
+    window.openDatabasePanel = () => setViewMode('database');
+    return () => { delete window.openDatabasePanel; };
+  }, []);
 
   const loadProject = (id) => {
     const proj = getProjectList().find(p => p.id === id);
@@ -746,6 +931,8 @@ ${rowsHtml}
             onMoveComponent={moveComponent}
             onSelectRow={selectRow}
             activeWindow={activeWindow}
+            canvasPadding={canvasPadding}
+            database={database}
           />
           <Inspector
             component={selectedElement}
@@ -755,6 +942,10 @@ ${rowsHtml}
             onDuplicate={() => selectedId && duplicateComponent(selectedId)}
             windows={getWindows()}
             database={database}
+            canvasPadding={canvasPadding}
+            onCanvasPaddingChange={setCanvasPadding}
+            selectedId={selectedId}
+            themeColors={THEMES[theme]}
           />
         </div>
 

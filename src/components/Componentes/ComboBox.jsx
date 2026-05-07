@@ -1,10 +1,25 @@
 import React from 'react';
 
-function ComboBox({ items = ['Option 1', 'Option 2', 'Option 3'], width = 150, selectedIndex = 0, textColor = '#00ff00', borderColor = '#00ff00', bgColor = '#000000' }) {
+const getThemeColor = (val, themeVar) => {
+  if (!val || val.toLowerCase() === '#00ff00' || val.toLowerCase() === '#000000' || val === 'transparent') return `var(${themeVar})`;
+  return val;
+};
+
+function ComboBox({ items = ['Option 1', 'Option 2', 'Option 3'], width = 150, selectedIndex = 0, textColor = '', borderColor = '', bgColor = '' }) {
   return (
-    <select className="retro-select" style={{ width: `${width}px`, borderColor, color: textColor, background: bgColor }}>
+    <select 
+      className="retro-select" 
+      value={items[selectedIndex]}
+      onChange={() => {}} 
+      style={{ 
+        width: typeof width === 'string' && width.includes('%') ? width : `${width}px`, 
+        borderColor: getThemeColor(borderColor, '--border'), 
+        color: getThemeColor(textColor, '--text'), 
+        background: getThemeColor(bgColor, '--input-bg') 
+      }}
+    >
       {items.map((item, idx) => (
-        <option key={idx} selected={idx === selectedIndex}>{item}</option>
+        <option key={idx} value={item}>{item}</option>
       ))}
     </select>
   );

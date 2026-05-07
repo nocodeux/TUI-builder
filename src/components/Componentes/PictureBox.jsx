@@ -14,7 +14,12 @@ function PictureBox({ width = 150, height = 100, stretch = false, border = true,
   }), [onAddChild, onMoveChild]);
 
   return (
-    <div ref={drop} className="retro-picturebox" style={{ width: `${width}px`, minHeight: `${height}px`, border: border ? `1px solid ${borderColor || 'var(--border)'}` : 'none' }}>
+    <div ref={drop} className="retro-picturebox" style={{ 
+      width: typeof width === 'string' && width.includes('%') ? width : `${width}px`, 
+      minHeight: height ? (typeof height === 'string' && height.includes('%') ? height : `${height}px`) : 'auto',
+      height: height ? (typeof height === 'string' && height.includes('%') ? height : `${height}px`) : 'auto',
+      border: border ? `1px solid ${borderColor || 'var(--border)'}` : 'none' 
+    }}>
       {children}
       {isOver && <div style={{ color: 'var(--accent)', fontSize: 10, textAlign: 'center' }}>[+ Drop Image +]</div>}
     </div>

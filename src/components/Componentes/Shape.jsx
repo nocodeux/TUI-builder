@@ -1,11 +1,16 @@
 import React from 'react';
 
-function Shape({ shapeType = 'rectangle', width = 60, height = 40, borderColor = '#00ff00', bgColor = 'transparent', fill = false }) {
+const getThemeColor = (val, themeVar) => {
+  if (!val || val.toLowerCase() === '#00ff00' || val.toLowerCase() === '#000000' || val === 'transparent') return `var(${themeVar})`;
+  return val;
+};
+
+function Shape({ shapeType = 'rectangle', width = 60, height = 40, borderColor = '', bgColor = '', fill = false }) {
   const style = {
-    width: `${width}px`,
-    height: `${height}px`,
-    border: `1px solid ${borderColor}`,
-    backgroundColor: fill ? bgColor : 'transparent',
+    width: typeof width === 'string' && width.includes('%') ? width : `${width}px`,
+    height: typeof height === 'string' && height.includes('%') ? height : `${height}px`,
+    border: `1px solid ${getThemeColor(borderColor, '--text')}`,
+    backgroundColor: fill ? getThemeColor(bgColor, '--text') : 'transparent',
     display: 'inline-block',
     verticalAlign: 'middle'
   };

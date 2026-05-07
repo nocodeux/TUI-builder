@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 
-function ScrollBar({ value = 50, min = 0, max = 100, width = 150, height = 100, bgColor = '#000000', thumbColor = '#00ff00', onChange }) {
+const getThemeColor = (val, themeVar) => {
+  if (!val || val.toLowerCase() === '#00ff00' || val.toLowerCase() === '#000000' || val === 'transparent') return `var(${themeVar})`;
+  return val;
+};
+
+function ScrollBar({ value = 50, min = 0, max = 100, width = 150, height = 100, bgColor = '', thumbColor = '', onChange }) {
   const isHorizontal = width > height;
   const [currentValue, setCurrentValue] = useState(value);
   const percentage = max > min ? ((currentValue - min) / (max - min)) * 100 : 0;
@@ -24,8 +29,8 @@ function ScrollBar({ value = 50, min = 0, max = 100, width = 150, height = 100, 
     : { width: '100%', height: `${percentage}%` };
 
   return (
-    <div className="retro-scrollbar" style={barStyle} onClick={handleClick}>
-      <div style={{ ...thumbStyle, background: thumbColor, opacity: 0.5 }} />
+    <div className="retro-scrollbar" style={{ ...barStyle, background: getThemeColor(bgColor, '--input-bg'), border: '1px solid var(--border)' }} onClick={handleClick}>
+      <div style={{ ...thumbStyle, background: getThemeColor(thumbColor, '--text'), opacity: 0.5 }} />
     </div>
   );
 }

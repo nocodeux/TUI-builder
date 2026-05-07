@@ -205,7 +205,6 @@ body {
   position: relative;
   border: 1px dashed transparent;
   border-radius: 2px;
-  padding: 4px 2px;
   min-height: 36px;
   transition: border-color 0.12s, background 0.12s;
   cursor: default;
@@ -235,19 +234,27 @@ body {
   white-space: nowrap;
 }
 
-/* Drop zone entre componentes — se expande al hovear */
-.drop-zone {
-  align-self: stretch;
-  flex-shrink: 0;
-  pointer-events: all;
-  cursor: crosshair;
+/* ─── Drop insertion indicator ─── */
+.drop-indicator-line {
+  background: var(--accent);
   border-radius: 2px;
-  transition: width 0.12s, min-width 0.12s, background 0.12s, opacity 0.12s;
+  flex-shrink: 0;
+  pointer-events: none;
+  opacity: 0.9;
+  box-shadow: 0 0 8px var(--accent);
+  animation: indicator-pulse 0.8s ease-in-out infinite alternate;
+  z-index: 20;
+  margin: 16px 0; /* Increased spacing */
+}
+
+@keyframes indicator-pulse {
+  from { opacity: 0.7; }
+  to { opacity: 1; }
 }
 
 /* Nueva fila drop zone */
 .new-row-drop {
-  height: 14px;
+  height: 8px;
   border: 1px dashed transparent;
   border-radius: 2px;
   display: flex;
@@ -255,16 +262,16 @@ body {
   justify-content: center;
   transition: all 0.15s;
   color: var(--accent);
-  font-size: 9px;
+  font-size: 10px;
   margin: 1px 0;
   cursor: default;
 }
 
 .new-row-drop:hover,
 .new-row-drop.over {
-  height: 36px;
+  height: 40px;
   border-color: var(--accent);
-  background: rgba(255, 255, 0, 0.04);
+  background: rgba(255, 255, 0, 0.05);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -575,8 +582,8 @@ body {
   min-height: 20px;
 }
 
+/* Removing flex-shrink: 0 to allow Fill Container components to function */
 .retro-frame-content > .component-wrapper {
-  flex-shrink: 0;
 }
 
 .retro-window {
@@ -610,8 +617,8 @@ body {
   transition: border-color 0.2s;
 }
 
+/* Removing flex-shrink: 0 to allow Fill Container components to function */
 .retro-window-content > .component-wrapper {
-  flex-shrink: 0;
 }
 
 .retro-label {
@@ -661,6 +668,52 @@ body {
 
 .retro-data {
   display: inline-flex;
+}
+
+.retro-table-wrapper {
+  font-family: monospace;
+}
+
+.retro-table {
+  font-family: monospace;
+}
+
+/* Icon preview SVGs scale to container and inherit color */
+.icon-preview-svg svg,
+.image-icon-render svg {
+  width: 100% !important;
+  height: 100% !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  color: inherit !important;
+}
+
+.icon-preview-svg svg *,
+.image-icon-render svg * {
+  fill: inherit !important;
+  stroke: inherit !important;
+}
+
+/* Inspector input consistency */
+.inspector input[type="text"],
+.inspector input[type="number"],
+.inspector select,
+.inspector textarea {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: monospace;
+  padding: 4px 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.inspector input:focus,
+.inspector select:focus,
+.inspector textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+  background: rgba(255, 255, 0, 0.02);
 }
 
 .drop-indicator {

@@ -1,26 +1,16 @@
 /**
- * Canvas.jsx — Sistema de layout por filas con AutoLayout estilo Figma
+ * Canvas.jsx — Enhanced drag & drop with position-aware insertion
  *
- * BUGS CORREGIDOS:
- * 1. Doble drop: Frame/Window ahora retornan { handled: true } y Canvas
- *    verifica monitor.didDrop() correctamente antes de agregar al root.
- * 2. Layout: Cada "row" es un flex-container independiente con direction,
- *    gap, alignment y justification controlables desde el Inspector.
- *
- * MODELO DE DATOS NUEVO:
- * components = [
- *   {
- *     id, type: 'ROW',
- *     layout: { direction: 'row'|'column', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false },
- *     children: [ { id, type, props, children } ]
- *   }
- * ]
- *
- * Un ROW es el contenedor de layout. Puede contener componentes o estar
- * dentro de un Window/Frame. Los componentes hoja NO tienen ROW propio.
+ * KEY CHANGES FROM PREVIOUS VERSION:
+ * 1. Removed separate DropZone components — each component now detects
+ *    cursor position (before/after) based on row direction
+ * 2. Insertion indicator matches the size of the drop target area
+ * 3. Smooth row-to-row movement with visual feedback
+ * 4. Rows themselves are drop targets with position detection
+ * 5. Between-row drop zones for creating new rows
  */
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useDrop, useDrag } from 'react-dnd';
 import Window from './Componentes/Window';
 import Frame from './Componentes/Frame';
@@ -36,34 +26,104 @@ import PictureBox from './Componentes/PictureBox';
 import Timer from './Componentes/Timer';
 import Shape from './Componentes/Shape';
 import Line from './Componentes/Line';
-import Image from './Componentes/Image';
+import ImageComp from './Componentes/Image';
 import ScrollBar from './Componentes/ScrollBar';
 import Data from './Componentes/Data';
+import Table from './Componentes/Table';
 
 const componentMap = {
   Window, Frame, Row, Button, Label, Input: TextBox, TextBox, CheckBox, RadioButton,
-  ComboBox, ListBox, PictureBox, Timer, Shape, Line, Image,
-  HScrollBar: ScrollBar, VScrollBar: ScrollBar, Data
+  ComboBox, ListBox, PictureBox, Timer, Shape, Line, Image: ImageComp,
+  HScrollBar: ScrollBar, VScrollBar: ScrollBar, Data, Table
 };
 
 const CONTAINER_TYPES = ['Window', 'Frame', 'Row', 'PictureBox'];
 
-// ─── Componente hoja draggable (para reordenar dentro del canvas) ───────────
-function DraggableComponent({ comp, rowId, index, selectedId, onSelect, onDelete, onDuplicate, onAddComponent, activeWindow, onMoveComponent }) {
+// ─── Draggable component with position-aware drop detection ─────────────────
+function DraggableComponent({
+  comp, rowId, index, totalSiblings, selectedId, onSelect, onDelete, onDuplicate,
+  onAddComponent, activeWindow, onMoveComponent, rowDirection
+}) {
+  const ref = useRef(null);
+  const [dropIndicator, setDropIndicator] = useState(null); // 'before' | 'after' | null
+
   const [{ isDragging }, drag] = useDrag(() => ({
     type: 'EXISTING_COMPONENT',
-    item: { id: comp.id, fromRowId: rowId, fromIndex: index },
-    collect: monitor => ({ isDragging: !!monitor.isDragging() })
+    item: () => {
+      // Capture the element's dimensions for the insertion indicator
+      const rect = ref.current?.getBoundingClientRect();
+      return {
+        id: comp.id,
+        fromRowId: rowId,
+        fromIndex: index,
+        width: rect?.width || 80,
+        height: rect?.height || 32,
+      };
+    },
+    collect: monitor => ({ isDragging: !!monitor.isDragging() }),
+    end: () => setDropIndicator(null),
   }), [comp.id, rowId, index]);
+
+  // This component is also a drop target — detects cursor position
+  const [{ isOver }, drop] = useDrop(() => ({
+    accept: ['COMPONENT', 'EXISTING_COMPONENT'],
+    hover: (item, monitor) => {
+      if (!ref.current) return;
+      // Don't detect over self
+      if (item.id === comp.id) { setDropIndicator(null); return; }
+
+      const hoverRect = ref.current.getBoundingClientRect();
+      const clientOffset = monitor.getClientOffset();
+      if (!clientOffset) return;
+
+      const isHorizontal = rowDirection === 'row';
+
+      if (isHorizontal) {
+        const midX = hoverRect.left + hoverRect.width / 2;
+        setDropIndicator(clientOffset.x < midX ? 'before' : 'after');
+      } else {
+        const midY = hoverRect.top + hoverRect.height / 2;
+        setDropIndicator(clientOffset.y < midY ? 'before' : 'after');
+      }
+    },
+    drop: (item, monitor) => {
+      if (monitor.didDrop()) return; // Already handled by nested container
+      const insertIndex = dropIndicator === 'before' ? index : index + 1;
+
+      if (item.type !== undefined) {
+        // From Toolbox
+        onAddComponent(item.type, rowId, insertIndex);
+      } else {
+        // Reorder existing
+        onMoveComponent(item, rowId, insertIndex);
+      }
+      setDropIndicator(null);
+      return { handled: true };
+    },
+    collect: monitor => ({
+      isOver: monitor.isOver({ shallow: true }),
+    }),
+  }), [comp.id, rowId, index, dropIndicator, rowDirection, onAddComponent, onMoveComponent]);
+
+  // Clear indicator when not hovering
+  if (!isOver && dropIndicator) {
+    setTimeout(() => setDropIndicator(null), 0);
+  }
+
+  // Combine drag and drop refs
+  const combinedRef = (node) => {
+    ref.current = node;
+    drag(drop(node));
+  };
 
   const Component = componentMap[comp.type];
   if (!Component) return null;
 
-  // Ventanas inactivas se muestran semitransparentes
+  // Hidden windows
   if (comp.type === 'Window' && activeWindow && comp.id !== activeWindow) {
     return (
       <div
-        ref={drag}
+        ref={combinedRef}
         className="component-wrapper window-hidden"
         style={{ opacity: 0.35, cursor: 'grab' }}
         title={comp.props.title}
@@ -76,137 +136,189 @@ function DraggableComponent({ comp, rowId, index, selectedId, onSelect, onDelete
 
   const isContainer = CONTAINER_TYPES.includes(comp.type);
   const childCount = comp.children?.length || 0;
+  const isHorizontal = rowDirection === 'row';
 
   const handleKeyDown = e => {
     if (e.key === 'Delete') { e.preventDefault(); onDelete(comp.id); }
     if ((e.key === 'd' && (e.ctrlKey || e.metaKey))) { e.preventDefault(); onDuplicate(comp.id); }
   };
 
+  // Render children of containers (Window/Frame/Row/PictureBox)
   const renderContainerChildren = () => {
-    const content = [
-      <DropZone
-        key={`${comp.id}-drop-0`}
+    return (comp.children || []).map((child, ci) => (
+      <DraggableComponent
+        key={child.id}
+        comp={child}
         rowId={comp.id}
-        index={0}
-        onDropExisting={onMoveComponent}
-        onDropNew={onAddComponent}
+        index={ci}
+        totalSiblings={(comp.children || []).length}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        onDelete={onDelete}
+        onDuplicate={onDuplicate}
+        onAddComponent={onAddComponent}
+        activeWindow={activeWindow}
+        onMoveComponent={onMoveComponent}
+        rowDirection={comp.props?.layout?.direction || 'row'}
       />
-    ];
-
-    (comp.children || []).forEach((child, ci) => {
-      content.push(
-        <DraggableComponent
-          key={child.id}
-          comp={child}
-          rowId={comp.id}
-          index={ci}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          onDelete={onDelete}
-          onDuplicate={onDuplicate}
-          onAddComponent={onAddComponent}
-          activeWindow={activeWindow}
-          onMoveComponent={onMoveComponent}
-        />
-      );
-
-      content.push(
-        <DropZone
-          key={`${comp.id}-drop-${ci + 1}`}
-          rowId={comp.id}
-          index={ci + 1}
-          onDropExisting={onMoveComponent}
-          onDropNew={onAddComponent}
-        />
-      );
-    });
-
-    return content;
+    ));
   };
 
+  // Sizing styles
+  const sizingStyle = {};
+  const sizing = comp.props?.sizing;
+  const isWidthFill = sizing?.widthMode === 'fill';
+  const isHeightFill = sizing?.heightMode === 'fill';
+
+  if (isWidthFill) {
+    sizingStyle.flexGrow = 1;
+    sizingStyle.flexShrink = 1;
+    sizingStyle.flexBasis = '0%';
+    sizingStyle.minWidth = 0;
+    sizingStyle.alignSelf = 'stretch';
+  } else if (sizing?.widthMode === 'hug') {
+    sizingStyle.flexShrink = 0;
+  }
+
+  if (isHeightFill) {
+    sizingStyle.alignSelf = 'stretch';
+    sizingStyle.flexGrow = 1;
+    sizingStyle.minHeight = 0;
+  }
+
   return (
-    <div
-      ref={drag}
-      className={`component-wrapper ${selectedId === comp.id ? 'selected' : ''}`}
-      style={{ opacity: isDragging ? 0.4 : 1, cursor: 'grab', display: 'inline-flex' }}
-      onClick={e => { e.stopPropagation(); onSelect(comp.id); }}
-      onKeyDown={handleKeyDown}
-      tabIndex={0}
-    >
-      <Component
-        {...comp.props}
-        id={comp.id}
-        selected={selectedId === comp.id}
-        onAddChild={isContainer ? type => onAddComponent(type, comp.id, childCount) : undefined}
-        onMoveChild={isContainer ? item => onMoveComponent(item, comp.id, childCount) : undefined}
+    <>
+      {/* Insertion indicator BEFORE */}
+      {dropIndicator === 'before' && isOver && (
+        <div
+          className="drop-indicator-line"
+          style={{
+            width: isHorizontal ? 3 : (ref.current?.offsetWidth || '100%'),
+            height: isHorizontal ? (ref.current?.offsetHeight || 32) : 3,
+            flexShrink: 0,
+          }}
+        />
+      )}
+
+      <div
+        ref={combinedRef}
+        className={`component-wrapper ${selectedId === comp.id ? 'selected' : ''}`}
+        style={{
+          opacity: isDragging ? 0.3 : 1,
+          cursor: isDragging ? 'grabbing' : 'grab',
+          display: (isWidthFill || isHeightFill) ? 'flex' : 'inline-flex',
+          ...sizingStyle,
+        }}
+        onClick={e => { e.stopPropagation(); onSelect(comp.id); }}
+        onKeyDown={handleKeyDown}
+        tabIndex={0}
       >
-        {/* Hijos de containers (Window/Frame) — renderizados dentro */}
-        {isContainer && renderContainerChildren()}
-      </Component>
-    </div>
+        <Component
+          {...comp.props}
+          id={comp.id}
+          selected={selectedId === comp.id}
+          // Pass override sizing to the component
+          width={isWidthFill ? '100%' : comp.props.width}
+          height={isHeightFill ? '100%' : comp.props.height}
+          // If Table and bound to database, override rows
+          rows={comp.type === 'Table' && comp.props.dataSourceType === 'database' && comp.props.dataSource && database?.data?.[comp.props.dataSource] 
+                ? database.data[comp.props.dataSource] 
+                : comp.props.rows}
+          onAddChild={isContainer ? type => onAddComponent(type, comp.id, childCount) : undefined}
+          onMoveChild={isContainer ? item => onMoveComponent(item, comp.id, childCount) : undefined}
+        >
+          {isContainer && renderContainerChildren()}
+        </Component>
+      </div>
+
+      {/* Insertion indicator AFTER */}
+      {dropIndicator === 'after' && isOver && (
+        <div
+          className="drop-indicator-line"
+          style={{
+            width: isHorizontal ? 3 : (ref.current?.offsetWidth || '100%'),
+            height: isHorizontal ? (ref.current?.offsetHeight || 32) : 3,
+            flexShrink: 0,
+          }}
+        />
+      )}
+    </>
   );
 }
 
-// ─── Drop zone entre componentes (para reordenar) ────────────────────────────
-function DropZone({ rowId, index, onDropExisting, onDropNew }) {
-  const [{ isOver }, drop] = useDrop(() => ({
-    accept: ['COMPONENT', 'EXISTING_COMPONENT'],
-    drop: (item, monitor) => {
-      if (item.type !== undefined) {
-        // Viene del Toolbox (COMPONENT)
-        onDropNew(item.type, rowId, index);
-      } else {
-        // Reordenar existente
-        onDropExisting(item, rowId, index);
-      }
-      return { handled: true };
-    },
-    collect: monitor => ({ isOver: !!monitor.isOver() })
-  }), [rowId, index, onDropExisting, onDropNew]);
-
-  return (
-    <div
-      ref={drop}
-      className="drop-zone"
-      style={{
-        width: isOver ? 32 : 6,
-        minWidth: isOver ? 32 : 6,
-        height: '100%',
-        minHeight: 24,
-        background: isOver ? 'var(--accent)' : 'transparent',
-        opacity: isOver ? 0.6 : 0,
-        transition: 'all 0.15s ease',
-        borderRadius: 2,
-        flexShrink: 0,
-      }}
-    />
-  );
-}
-
-// ─── Fila de layout (ROW) ────────────────────────────────────────────────────
-function LayoutRow({ row, rowIndex, selectedId, onSelect, onDelete, onDuplicate, onAddComponent, activeWindow, onMoveComponent, onDropToRow, onSelectRow }) {
+// ─── Row of layout (with position-aware drop on empty area) ─────────────────
+function LayoutRow({
+  row, rowIndex, selectedId, onSelect, onDelete, onDuplicate,
+  onAddComponent, activeWindow, onMoveComponent, onDropToRow, onSelectRow
+}) {
   const layout = row.layout || { direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false };
+  const rowRef = useRef(null);
 
-  // Drop zone al final de la fila (para agregar desde toolbox)
+  // Row is a drop target — drops at the end (or calculates position)
   const [{ isOver: isOverRow }, dropRow] = useDrop(() => ({
     accept: ['COMPONENT', 'EXISTING_COMPONENT'],
+    hover: (item, monitor) => {
+      // Could add edge-detection here for top/bottom row splitting
+    },
     drop: (item, monitor) => {
-      if (monitor.didDrop()) return; // ya lo atrapó una drop zone interior
+      if (monitor.didDrop()) return; // Already handled by a child
+
+      // Calculate drop position based on cursor location
+      let insertIndex = row.children.length; // default: end
+
+      if (rowRef.current && row.children.length > 0) {
+        const clientOffset = monitor.getClientOffset();
+        if (clientOffset) {
+          const rowRect = rowRef.current.getBoundingClientRect();
+          const isHorizontal = layout.direction === 'row';
+
+          // Find the component whose position is closest to cursor
+          const wrappers = rowRef.current.querySelectorAll(':scope > .component-wrapper');
+          for (let i = 0; i < wrappers.length; i++) {
+            const wr = wrappers[i].getBoundingClientRect();
+            if (isHorizontal) {
+              if (clientOffset.x < wr.left + wr.width / 2) {
+                insertIndex = i;
+                break;
+              }
+            } else {
+              if (clientOffset.y < wr.top + wr.height / 2) {
+                insertIndex = i;
+                break;
+              }
+            }
+          }
+        }
+      }
+
       if (item.type !== undefined) {
-        onDropToRow(item.type, row.id, row.children.length);
+        onDropToRow(item.type, row.id, insertIndex);
       } else {
-        onMoveComponent(item, row.id, row.children.length);
+        onMoveComponent(item, row.id, insertIndex);
       }
       return { handled: true };
     },
     collect: monitor => ({ isOver: !!monitor.isOver({ shallow: true }) })
-  }), [row.id, row.children.length]);
+  }), [row.id, row.children.length, layout.direction]);
 
   const isRowSelected = selectedId === row.id;
 
+  // Padding from layout
+  const padding = {
+    paddingTop: layout.paddingTop ?? 0,
+    paddingRight: layout.paddingRight ?? 0,
+    paddingBottom: layout.paddingBottom ?? 0,
+    paddingLeft: layout.paddingLeft ?? 0,
+  };
+
+  const combinedRowRef = (node) => {
+    rowRef.current = node;
+    dropRow(node);
+  };
+
   return (
     <div
-      ref={dropRow}
+      ref={combinedRowRef}
       className={`layout-row ${isRowSelected ? 'row-selected' : ''}`}
       style={{
         display: 'flex',
@@ -216,17 +328,17 @@ function LayoutRow({ row, rowIndex, selectedId, onSelect, onDelete, onDuplicate,
         justifyContent: layout.justify,
         flexWrap: layout.wrap ? 'wrap' : 'nowrap',
         minHeight: 32,
-        padding: '4px 2px',
+        ...padding,
         border: isRowSelected ? '1px dashed var(--accent)' : '1px dashed transparent',
         borderRadius: 2,
         position: 'relative',
-        background: isOverRow ? 'rgba(0,255,0,0.03)' : 'transparent',
-        transition: 'border-color 0.15s',
+        background: isOverRow ? 'rgba(0,255,0,0.04)' : 'transparent',
+        transition: 'border-color 0.15s, background 0.15s',
         cursor: 'default',
       }}
       onClick={e => { e.stopPropagation(); onSelectRow(row.id); }}
     >
-      {/* Etiqueta de fila */}
+      {/* Row label */}
       {isRowSelected && (
         <div style={{
           position: 'absolute', top: -16, left: 0,
@@ -238,67 +350,65 @@ function LayoutRow({ row, rowIndex, selectedId, onSelect, onDelete, onDuplicate,
         </div>
       )}
 
-      {/* Drop zone inicial */}
-      <DropZone
-        rowId={row.id} index={0}
-        onDropExisting={onMoveComponent}
-        onDropNew={onDropToRow}
-      />
-
       {row.children.map((comp, ci) => (
-        <React.Fragment key={comp.id}>
-          <DraggableComponent
-            comp={comp}
-            rowId={row.id}
-            index={ci}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            onDelete={onDelete}
-            onDuplicate={onDuplicate}
-            onAddComponent={onAddComponent}
-            activeWindow={activeWindow}
-            onMoveComponent={onMoveComponent}
-          />
-          {/* Drop zone después de cada componente */}
-          <DropZone
-            rowId={row.id} index={ci + 1}
-            onDropExisting={onMoveComponent}
-            onDropNew={onDropToRow}
-          />
-        </React.Fragment>
+        <DraggableComponent
+          key={comp.id}
+          comp={comp}
+          rowId={row.id}
+          index={ci}
+          totalSiblings={row.children.length}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onDelete={onDelete}
+          onDuplicate={onDuplicate}
+          onAddComponent={(type, parentId, idx) => {
+            if (parentId && parentId !== row.id) {
+              // Adding inside a container child
+              onAddComponent(type, parentId, idx);
+            } else {
+              onDropToRow(type, row.id, idx);
+            }
+          }}
+          activeWindow={activeWindow}
+          onMoveComponent={onMoveComponent}
+          rowDirection={layout.direction}
+        />
       ))}
 
+      {/* Empty row placeholder */}
       {row.children.length === 0 && (
         <div style={{
-          color: 'var(--text-dim)', fontSize: 10, padding: '4px 8px',
-          pointerEvents: 'none', opacity: isOverRow ? 0 : 0.6
+          color: 'var(--text-dim)', fontSize: 10, padding: '8px 12px',
+          pointerEvents: 'none', opacity: isOverRow ? 0 : 0.6,
+          width: '100%', textAlign: 'center',
         }}>
-          [ drop here ]
+          [ drop components here ]
         </div>
       )}
     </div>
   );
 }
 
-// ─── Drop zone para nueva fila ────────────────────────────────────────────────
-function NewRowDropZone({ onDropNewRow }) {
+// ─── Between-row drop zone (for creating new rows) ──────────────────────────
+function NewRowDropZone({ onDropNewRow, afterIndex }) {
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ['COMPONENT', 'EXISTING_COMPONENT'],
     drop: (item, monitor) => {
       if (monitor.didDrop()) return;
       const type = item.type !== undefined ? item.type : null;
-      onDropNewRow(type, item);
+      onDropNewRow(type, item, afterIndex);
       return { handled: true };
     },
     collect: monitor => ({ isOver: !!monitor.isOver({ shallow: true }) })
-  }), []);
+  }), [afterIndex]);
 
   return (
     <div
       ref={drop}
+      className={`new-row-drop ${isOver ? 'over' : ''}`}
       style={{
-        height: isOver ? 40 : 16,
-        border: isOver ? '1px dashed var(--accent)' : '1px dashed transparent',
+        height: isOver ? 40 : 8,
+        border: isOver ? '2px dashed var(--accent)' : '1px dashed transparent',
         borderRadius: 2,
         display: 'flex',
         alignItems: 'center',
@@ -306,29 +416,32 @@ function NewRowDropZone({ onDropNewRow }) {
         transition: 'all 0.15s',
         color: 'var(--accent)',
         fontSize: 10,
-        marginTop: 2,
+        margin: '1px 0',
+        background: isOver ? 'rgba(255,255,0,0.05)' : 'transparent',
       }}
     >
-      {isOver && '+ Nueva fila'}
+      {isOver && '+ New Row'}
     </div>
   );
 }
 
-// ─── Canvas principal ─────────────────────────────────────────────────────────
+// ─── Main Canvas ────────────────────────────────────────────────────────────
 function Canvas({
-  rows,           // [ { id, layout, children: [comp, ...] } ]
+  rows,
   selectedId,
   onSelect,
   onDelete,
   onDuplicate,
   viewMode,
-  onAddToRow,     // (type, rowId, index) => void
-  onAddNewRow,    // (type, existingItem?) => void
-  onMoveComponent,// (item, toRowId, toIndex) => void
-  onSelectRow,    // (rowId) => void
+  onAddToRow,
+  onAddNewRow,
+  onMoveComponent,
+  onSelectRow,
   activeWindow,
+  canvasPadding,
+  database,
 }) {
-  // Drop sobre el canvas vacío → nueva fila
+  // Drop on empty canvas → new row
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ['COMPONENT'],
     drop: (item, monitor) => {
@@ -339,25 +452,44 @@ function Canvas({
     collect: monitor => ({ isOver: !!monitor.isOver({ shallow: true }) })
   }), []);
 
+  const cPad = canvasPadding || { top: 20, right: 20, bottom: 20, left: 20 };
+
   return (
     <div className={`canvas ${viewMode}`}>
       <div
         ref={drop}
         className="preview-area"
-        style={{ background: isOver ? 'rgba(0,255,0,0.02)' : undefined }}
+        style={{
+          background: isOver ? 'rgba(0,255,0,0.02)' : undefined,
+          paddingTop: cPad.top,
+          paddingRight: cPad.right,
+          paddingBottom: cPad.bottom,
+          paddingLeft: cPad.left,
+        }}
         onClick={() => onSelect(null)}
       >
         {rows.length === 0 && !isOver && (
           <div style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 40, pointerEvents: 'none' }}>
-            [ Arrastra componentes del toolbox al canvas ]<br />
-            [ Cada drop crea una nueva fila ]<br />
-            [ Selecciona una fila para controlar su layout ]<br />
-            [ Delete elimina · Ctrl+D duplica ]
+            [ Drag components from the toolbox to the canvas ]<br />
+            [ Each drop creates a new row ]<br />
+            [ Select a row to control its layout ]<br />
+            [ Delete removes · Ctrl+D duplicates ]
           </div>
         )}
 
         {rows.map((row, ri) => (
           <React.Fragment key={row.id}>
+            {/* Between-row drop zone (before first row) */}
+            {ri === 0 && (
+              <NewRowDropZone
+                afterIndex={0}
+                onDropNewRow={(type, item, idx) => {
+                  if (type) onAddNewRow(type, null, idx);
+                  else if (item?.id) onMoveComponent(item, '__newrow__', 0, idx);
+                }}
+              />
+            )}
+
             <LayoutRow
               row={row}
               rowIndex={ri}
@@ -365,24 +497,26 @@ function Canvas({
               onSelect={onSelect}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
-              onAddComponent={(type, parentId = null, index = row.children.length) => onAddToRow(type, row.id, index, parentId)}
+              onAddComponent={(type, parentId, index) => onAddToRow(type, row.id, index, parentId !== row.id ? parentId : null)}
               activeWindow={activeWindow}
               onMoveComponent={onMoveComponent}
               onDropToRow={onAddToRow}
               onSelectRow={onSelectRow}
             />
-            {/* Drop zone para nueva fila entre filas existentes */}
-            <NewRowDropZone onDropNewRow={(type, item) => {
-              if (type) onAddNewRow(type, null, ri + 1);
-              else if (item?.id) onMoveComponent(item, '__newrow__', 0, ri + 1);
-            }} />
+
+            {/* Between-row drop zone (after each row) */}
+            <NewRowDropZone
+              afterIndex={ri + 1}
+              onDropNewRow={(type, item, idx) => {
+                if (type) onAddNewRow(type, null, idx);
+                else if (item?.id) onMoveComponent(item, '__newrow__', 0, idx);
+              }}
+            />
           </React.Fragment>
         ))}
 
-        {/* Drop zone final siempre visible */}
-        {rows.length > 0 && (
-          <div style={{ height: 32 }} />
-        )}
+        {/* Extra space at bottom */}
+        {rows.length > 0 && <div style={{ height: 40 }} />}
       </div>
     </div>
   );

@@ -51,14 +51,15 @@ function Frame({
     '1px solid';
 
   return (
-    <div className="retro-frame-wrapper" style={{ width: `${width}px` }}>
+    <div className="retro-frame-wrapper" style={{ width: typeof width === 'string' && width.includes('%') ? width : `${width}px` }}>
       <fieldset
         ref={drop}
         className="retro-frame"
         style={{
           border: `${borderValue} ${borderColor || 'var(--border)'}`,
           background: bgColor || 'transparent',
-          minHeight: height ? `${height}px` : 'auto',
+          minHeight: height ? (typeof height === 'string' && height.includes('%') ? height : `${height}px`) : 'auto',
+          height: height ? (typeof height === 'string' && height.includes('%') ? height : `${height}px`) : 'auto',
           outline: isOver ? `2px dashed var(--accent)` : 'none',
           outlineOffset: -2,
           transition: 'outline 0.1s',
@@ -74,6 +75,10 @@ function Frame({
             alignItems: layout.align,
             justifyContent: layout.justify,
             flexWrap: layout.wrap ? 'wrap' : 'nowrap',
+            paddingTop: layout.paddingTop ?? 0,
+            paddingRight: layout.paddingRight ?? 0,
+            paddingBottom: layout.paddingBottom ?? 0,
+            paddingLeft: layout.paddingLeft ?? 0,
           }}
         >
           {children}

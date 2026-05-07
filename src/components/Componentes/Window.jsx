@@ -44,9 +44,9 @@ function Window({
       ref={drop}
       className="retro-window"
       style={{
-        width: `${width}px`,
-        minHeight: height ? `${height}px` : '',
-        height: height ? `${height}px` : 'auto',
+        width: typeof width === 'string' && width.includes('%') ? width : `${width}px`,
+        minHeight: height ? (typeof height === 'string' && height.includes('%') ? height : `${height}px`) : '',
+        height: height ? (typeof height === 'string' && height.includes('%') ? height : `${height}px`) : 'auto',
         background: bgColor || 'var(--bg)',
         borderColor: borderColor || 'var(--border)',
       }}
@@ -68,9 +68,14 @@ function Window({
           alignItems: layout.align,
           justifyContent: layout.justify,
           flexWrap: layout.wrap ? 'wrap' : 'nowrap',
+          paddingTop: (layout.paddingTop ?? 0) + 12,
+          paddingRight: (layout.paddingRight ?? 0) + 12,
+          paddingBottom: (layout.paddingBottom ?? 0) + 12,
+          paddingLeft: (layout.paddingLeft ?? 0) + 12,
           outline: isOver ? '2px dashed var(--accent)' : 'none',
           outlineOffset: -4,
           transition: 'outline 0.1s',
+          minHeight: 40,
         }}
       >
         {children}
