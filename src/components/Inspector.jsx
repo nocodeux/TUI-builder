@@ -45,8 +45,11 @@ function AutoLayoutPanel({ layout = {}, onUpdate }) {
       <div className="property-group">
         <label>GAP (px)</label>
         <input
-          type="number" min="0" max="200" value={gap}
-          onChange={e => onUpdate({ gap: parseInt(e.target.value, 10) || 0 })}
+          type="number" min="0" max="200" value={gap === '' ? '' : gap}
+          onChange={e => {
+            const value = e.target.value;
+            onUpdate({ gap: value === '' ? '' : parseInt(value, 10) || 0 });
+          }}
           style={{ width: '100%' }}
         />
       </div>
@@ -107,7 +110,12 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
   const [localProps, setLocalProps] = useState({});
 
   useEffect(() => {
-    if (component) setLocalProps({ ...component.props, ...(isRow ? component.layout || {} : {}) });
+    if (component) {
+      const layoutProps = isRow
+        ? (component.layout || {})
+        : (component.props?.layout || {});
+      setLocalProps({ ...component.props, ...layoutProps });
+    }
   }, [component?.id]);
 
   const commitChange = useCallback((field, value) => {
@@ -160,6 +168,7 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
   // ── Inspector normal para componentes ─────────────────────────────────────
   const updateLocal = (field, value) => setLocalProps(prev => ({ ...prev, [field]: value }));
   const updateAndCommit = (field, value) => { updateLocal(field, value); commitChange(field, value); };
+  const showLayoutPanel = ['Window', 'Frame', 'Row'].includes(component.type);
 
   const renderNumber = (field, label, placeholder = '', min) => (
     <div className="property-group">
@@ -182,19 +191,40 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
   );
 
   const isHex = v => /^#[0-9a-fA-F]{6}$/.test(v);
+  const normalizePickerColor = (value, fallback) => isHex(value) ? value : fallback;
+  const isTransparentColor = v => v === 'transparent';
+  const isTransparentPrefix = v => 'transparent'.startsWith((v || '').toLowerCase());
 
-  const renderColor = (label, field, def = '#00ff00') => (
+  const renderColor = (label, field, def = '#00ff00', allowTransparent = false) => (
     <div className="property-group">
       <label>{label}</label>
       <div style={{ display: 'flex', gap: 4 }}>
-        <input type="text" className="hex-input" placeholder={def} maxLength={7}
-          value={localProps[field] || def}
-          onChange={e => { if (/^#[0-9a-fA-F]{0,6}$/.test(e.target.value)) updateLocal(field, e.target.value); }}
-          onBlur={() => { if (isHex(localProps[field])) commitChange(field, localProps[field]); else updateLocal(field, component.props[field] || def); }}
-          onKeyDown={e => { if (e.key === 'Enter' && isHex(localProps[field])) { commitChange(field, localProps[field]); e.target.blur(); } }}
+        <input type="text" className="hex-input" placeholder={def} maxLength={allowTransparent ? 11 : 7}
+          value={localProps[field] ?? ''}
+          onChange={e => {
+            const value = e.target.value;
+            if (value === '' || /^#[0-9a-fA-F]{0,6}$/.test(value) || (allowTransparent && isTransparentPrefix(value))) {
+              updateLocal(field, value);
+            }
+          }}
+          onBlur={() => {
+            const value = localProps[field];
+            if (value === '' || isHex(value) || (allowTransparent && isTransparentColor(value))) {
+              commitChange(field, value);
+            } else {
+              updateLocal(field, component.props[field] ?? '');
+            }
+          }}
+          onKeyDown={e => {
+            const value = localProps[field];
+            if (e.key === 'Enter' && (value === '' || isHex(value) || (allowTransparent && isTransparentColor(value)))) {
+              commitChange(field, value);
+              e.target.blur();
+            }
+          }}
         />
         <input type="color"
-          value={isHex(localProps[field]) ? localProps[field] : (component.props[field] || def)}
+          value={normalizePickerColor(localProps[field], normalizePickerColor(component.props[field], def))}
           onChange={e => updateAndCommit(field, e.target.value)}
           className="color-picker"
         />
@@ -215,7 +245,7 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
           </select>
         </div>
         {renderColor('TEXT COLOR','textColor','#00ff00')}
-        {renderColor('BACKGROUND','bgColor','#000000')}
+        {renderColor('BACKGROUND','bgColor','#000000', true)}
         {renderColor('BORDER COLOR','borderColor','#00ff00')}
       </>);
       case 'Frame': return (<>
@@ -228,14 +258,15 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
           </select>
         </div>
         {renderColor('TEXT COLOR','textColor','#ffff00')}
-        {renderColor('BACKGROUND','bgColor','transparent')}
+        {renderColor('BACKGROUND','bgColor','#000000', true)}
         {renderColor('BORDER COLOR','borderColor','#00ff00')}
       </>);
       case 'Button': return (<>
         <div className="property-group"><label>TEXT</label><input type="text" value={localProps.text||''} onChange={e => updateAndCommit('text', e.target.value)} /></div>
         {renderNumber('width','WIDTH (px)','80')}
+        <div className="property-group"><label>DISABLED</label><input type="checkbox" checked={localProps.disabled||false} onChange={e => updateAndCommit('disabled', e.target.checked)} /></div>
         {renderColor('TEXT COLOR','textColor','#00ff00')}
-        {renderColor('BACKGROUND','bgColor','transparent')}
+        {renderColor('BACKGROUND','bgColor','#000000', true)}
         {renderColor('BORDER COLOR','borderColor','#00ff00')}
         <div className="property-divider" />
         <div className="property-group"><label>ACTION</label>
@@ -272,6 +303,7 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         {renderColor('TEXT COLOR','textColor','#00ff00')}
         <div className="property-group"><label>LINK URL</label><input type="text" value={localProps.linkUrl||''} onChange={e => updateAndCommit('linkUrl', e.target.value)} placeholder="https://... (opcional)" /></div>
       </>);
+      case 'Input':
       case 'TextBox': return (<>
         <div className="property-group"><label>PLACEHOLDER</label><input type="text" value={localProps.placeholder||''} onChange={e => updateAndCommit('placeholder', e.target.value)} /></div>
         {renderNumber('width','WIDTH (px)','150')}
@@ -281,6 +313,7 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
           </select>
         </div>
         <div className="property-group"><label>READ ONLY</label><input type="checkbox" checked={localProps.readOnly||false} onChange={e => updateAndCommit('readOnly', e.target.checked)} /></div>
+        <div className="property-group"><label>DISABLED</label><input type="checkbox" checked={localProps.disabled||false} onChange={e => updateAndCommit('disabled', e.target.checked)} /></div>
         {renderColor('TEXT COLOR','textColor','#00ff00')}
         {renderColor('BORDER COLOR','borderColor','#00ff00')}
         {renderColor('BACKGROUND','bgColor','#000000')}
@@ -306,7 +339,7 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         {renderNumber('height','HEIGHT (px)','40')}
         <div className="property-group"><label>FILL</label><input type="checkbox" checked={localProps.fill||false} onChange={e => updateAndCommit('fill', e.target.checked)} /></div>
         {renderColor('BORDER COLOR','borderColor','#00ff00')}
-        {renderColor('FILL COLOR','bgColor','transparent')}
+        {renderColor('FILL COLOR','bgColor','#000000', true)}
       </>);
       case 'Line': return (<>
         <div className="property-group"><label>FULL WIDTH</label><input type="checkbox" checked={localProps.fullWidth!==false} onChange={e => updateAndCommit('fullWidth', e.target.checked)} /></div>
@@ -366,6 +399,15 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         <div style={{ fontSize: 9, color: 'var(--text-dim)', wordBreak: 'break-all' }}>{component.id}</div>
       </div>
       <div className="property-divider" />
+      {showLayoutPanel && (
+        <>
+          <AutoLayoutPanel
+            layout={component.props?.layout || component.layout || {}}
+            onUpdate={(changes) => onUpdate(component.id, changes)}
+          />
+          <div className="property-divider" />
+        </>
+      )}
       {renderProps()}
       <div className="property-divider" />
       <div style={{ display: 'flex', gap: 4 }}>

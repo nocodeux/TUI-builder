@@ -27,6 +27,7 @@ import Frame from './Componentes/Frame';
 import Button from './Componentes/Button';
 import Label from './Componentes/Label';
 import TextBox from './Componentes/TextBox';
+import Row from './Componentes/Row';
 import CheckBox from './Componentes/CheckBox';
 import RadioButton from './Componentes/RadioButton';
 import ComboBox from './Componentes/ComboBox';
@@ -40,12 +41,12 @@ import ScrollBar from './Componentes/ScrollBar';
 import Data from './Componentes/Data';
 
 const componentMap = {
-  Window, Frame, Button, Label, TextBox, CheckBox, RadioButton,
+  Window, Frame, Row, Button, Label, Input: TextBox, TextBox, CheckBox, RadioButton,
   ComboBox, ListBox, PictureBox, Timer, Shape, Line, Image,
   HScrollBar: ScrollBar, VScrollBar: ScrollBar, Data
 };
 
-const CONTAINER_TYPES = ['Window', 'Frame', 'PictureBox'];
+const CONTAINER_TYPES = ['Window', 'Frame', 'Row', 'PictureBox'];
 
 // ─── Componente hoja draggable (para reordenar dentro del canvas) ───────────
 function DraggableComponent({ comp, rowId, index, selectedId, onSelect, onDelete, onDuplicate, onAddComponent, activeWindow, onMoveComponent }) {
@@ -74,10 +75,53 @@ function DraggableComponent({ comp, rowId, index, selectedId, onSelect, onDelete
   }
 
   const isContainer = CONTAINER_TYPES.includes(comp.type);
+  const childCount = comp.children?.length || 0;
 
   const handleKeyDown = e => {
     if (e.key === 'Delete') { e.preventDefault(); onDelete(comp.id); }
     if ((e.key === 'd' && (e.ctrlKey || e.metaKey))) { e.preventDefault(); onDuplicate(comp.id); }
+  };
+
+  const renderContainerChildren = () => {
+    const content = [
+      <DropZone
+        key={`${comp.id}-drop-0`}
+        rowId={comp.id}
+        index={0}
+        onDropExisting={onMoveComponent}
+        onDropNew={onAddComponent}
+      />
+    ];
+
+    (comp.children || []).forEach((child, ci) => {
+      content.push(
+        <DraggableComponent
+          key={child.id}
+          comp={child}
+          rowId={comp.id}
+          index={ci}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onDelete={onDelete}
+          onDuplicate={onDuplicate}
+          onAddComponent={onAddComponent}
+          activeWindow={activeWindow}
+          onMoveComponent={onMoveComponent}
+        />
+      );
+
+      content.push(
+        <DropZone
+          key={`${comp.id}-drop-${ci + 1}`}
+          rowId={comp.id}
+          index={ci + 1}
+          onDropExisting={onMoveComponent}
+          onDropNew={onAddComponent}
+        />
+      );
+    });
+
+    return content;
   };
 
   return (
@@ -93,26 +137,11 @@ function DraggableComponent({ comp, rowId, index, selectedId, onSelect, onDelete
         {...comp.props}
         id={comp.id}
         selected={selectedId === comp.id}
-        onAddChild={isContainer ? type => onAddComponent(type, comp.id) : undefined}
+        onAddChild={isContainer ? type => onAddComponent(type, comp.id, childCount) : undefined}
+        onMoveChild={isContainer ? item => onMoveComponent(item, comp.id, childCount) : undefined}
       >
         {/* Hijos de containers (Window/Frame) — renderizados dentro */}
-        {isContainer && comp.children && comp.children.length > 0 &&
-          comp.children.map((child, ci) => (
-            <DraggableComponent
-              key={child.id}
-              comp={child}
-              rowId={comp.id}   // el parent es el container
-              index={ci}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              onDelete={onDelete}
-              onDuplicate={onDuplicate}
-              onAddComponent={onAddComponent}
-              activeWindow={activeWindow}
-              onMoveComponent={onMoveComponent}
-            />
-          ))
-        }
+        {isContainer && renderContainerChildren()}
       </Component>
     </div>
   );
@@ -133,7 +162,7 @@ function DropZone({ rowId, index, onDropExisting, onDropNew }) {
       return { handled: true };
     },
     collect: monitor => ({ isOver: !!monitor.isOver() })
-  }), [rowId, index]);
+  }), [rowId, index, onDropExisting, onDropNew]);
 
   return (
     <div
@@ -191,7 +220,7 @@ function LayoutRow({ row, rowIndex, selectedId, onSelect, onDelete, onDuplicate,
         border: isRowSelected ? '1px dashed var(--accent)' : '1px dashed transparent',
         borderRadius: 2,
         position: 'relative',
-        background: isOver => isOver ? 'rgba(0,255,0,0.03)' : 'transparent',
+        background: isOverRow ? 'rgba(0,255,0,0.03)' : 'transparent',
         transition: 'border-color 0.15s',
         cursor: 'default',
       }}
@@ -336,7 +365,7 @@ function Canvas({
               onSelect={onSelect}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
-              onAddComponent={(type, parentId) => onAddToRow(type, row.id, row.children.length, parentId)}
+              onAddComponent={(type, parentId = null, index = row.children.length) => onAddToRow(type, row.id, index, parentId)}
               activeWindow={activeWindow}
               onMoveComponent={onMoveComponent}
               onDropToRow={onAddToRow}

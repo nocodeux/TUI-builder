@@ -4,9 +4,10 @@ import { useDrag } from 'react-dnd';
 const componentes = [
   { type: 'Window', label: 'Window' },
   { type: 'Frame', label: 'Frame' },
+  { type: 'Row', label: 'Row' },
   { type: 'Button', label: 'Button' },
   { type: 'Label', label: 'Label' },
-  { type: 'TextBox', label: 'TextBox' },
+  { type: 'Input', label: 'Input' },
   { type: 'CheckBox', label: 'CheckBox' },
   { type: 'RadioButton', label: 'RadioButton' },
   { type: 'ComboBox', label: 'ComboBox' },

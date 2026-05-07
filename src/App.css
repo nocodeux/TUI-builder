@@ -504,19 +504,26 @@ body {
    ═══════════════════════════════════════════════════════════════ */
 
 .retro-button {
-  background: transparent;
-  border: 1px solid var(--text);
-  color: var(--text);
+  background: var(--button-bg, transparent);
+  border: 1px solid var(--button-border, var(--text));
+  color: var(--button-text, var(--text));
   padding: 4px 12px;
   font-family: monospace;
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
 }
 
-.retro-button:hover {
+.retro-button:hover:not(:disabled) {
   background: var(--text);
   color: var(--bg);
+}
+
+.retro-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(50%);
 }
 
 .retro-textbox {
@@ -526,6 +533,16 @@ body {
   padding: 4px 8px;
   font-family: monospace;
   font-size: 12px;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.retro-textbox:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.retro-textbox:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .retro-textbox:focus {
@@ -597,6 +614,13 @@ body {
   flex-shrink: 0;
 }
 
+.retro-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  max-width: 100%;
+}
+
 .retro-checkbox,
 .retro-radio {
   display: inline-flex;
@@ -620,6 +644,15 @@ body {
   align-items: center;
   justify-content: center;
   background: var(--bg);
+}
+
+.retro-row {
+  width: 100%;
+  border: 1px dashed var(--border);
+  padding: 8px;
+  min-height: 32px;
+  position: relative;
+  background: rgba(255, 255, 0, 0.03);
 }
 
 .retro-timer {

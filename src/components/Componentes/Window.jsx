@@ -14,8 +14,10 @@ function Window({
   bgColor = '',
   textColor = '',
   borderColor = '',
+  layout = { direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false },
   children,
   onAddChild,
+  onMoveChild,
   id
 }) {
   const [{ isOver }, drop] = useDrop(() => ({
@@ -27,13 +29,15 @@ function Window({
       if (item.type !== undefined) {
         // Viene del Toolbox — agregar como hijo de este Window
         if (onAddChild) onAddChild(item.type);
+      } else if (item.id && onMoveChild) {
+        onMoveChild(item);
       }
       return { handled: true };
     },
     collect: (monitor) => ({
       isOver: !!monitor.isOver({ shallow: true })
     })
-  }), [onAddChild]);
+  }), [onAddChild, onMoveChild]);
 
   return (
     <div
@@ -58,6 +62,12 @@ function Window({
       <div
         className="retro-window-content"
         style={{
+          display: 'flex',
+          flexDirection: layout.direction,
+          gap: layout.gap,
+          alignItems: layout.align,
+          justifyContent: layout.justify,
+          flexWrap: layout.wrap ? 'wrap' : 'nowrap',
           outline: isOver ? '2px dashed var(--accent)' : 'none',
           outlineOffset: -4,
           transition: 'outline 0.1s',

@@ -17,8 +17,10 @@ function Frame({
   bgColor = '',
   textColor = '',
   borderColor = '',
+  layout = { direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false },
   children,
   onAddChild,
+  onMoveChild,
   id
 }) {
   const [{ isOver }, drop] = useDrop(() => ({
@@ -30,6 +32,8 @@ function Frame({
       if (item.type !== undefined) {
         // Viene del Toolbox — agregar como hijo del Frame
         if (onAddChild) onAddChild(item.type);
+      } else if (item.id && onMoveChild) {
+        onMoveChild(item);
       }
       // Si es EXISTING_COMPONENT (reordenar) no hacemos nada aquí —
       // el reordenamiento entre filas lo maneja el Canvas
@@ -39,7 +43,7 @@ function Frame({
     collect: (monitor) => ({
       isOver: !!monitor.isOver({ shallow: true })
     })
-  }), [onAddChild]);
+  }), [onAddChild, onMoveChild]);
 
   const borderValue =
     borderStyle === 'double' ? '3px double' :
@@ -61,7 +65,17 @@ function Frame({
         }}
       >
         <legend style={{ color: textColor || 'var(--accent)' }}>{title}</legend>
-        <div className="retro-frame-content">
+        <div
+          className="retro-frame-content"
+          style={{
+            display: 'flex',
+            flexDirection: layout.direction,
+            gap: layout.gap,
+            alignItems: layout.align,
+            justifyContent: layout.justify,
+            flexWrap: layout.wrap ? 'wrap' : 'nowrap',
+          }}
+        >
           {children}
           {isOver && (
             <div className="drop-indicator">[+ drop here +]</div>
