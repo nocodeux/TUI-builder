@@ -42,7 +42,7 @@ const CONTAINER_TYPES = ['Window', 'Frame', 'Row', 'PictureBox'];
 // ─── Draggable component with position-aware drop detection ─────────────────
 function DraggableComponent({
   comp, rowId, topRowId, index, totalSiblings, selectedId, onSelect, onDelete, onDuplicate,
-  onAddComponent, activeWindow, onMoveComponent, rowDirection
+  onAddComponent, activeWindow, onMoveComponent, rowDirection, onNavigate
 }) {
   const currentTopRowId = topRowId || rowId;
   const ref = useRef(null);
@@ -62,7 +62,6 @@ function DraggableComponent({
         height: rect?.height || 32,
       };
     },
-    collect: monitor => ({ isDragging: !!monitor.isDragging() }),
     collect: monitor => ({ isDragging: !!monitor.isDragging() }),
     end: () => setDropIndicator(null),
   }), [comp.id, rowId, index, onMoveComponent]);
@@ -171,6 +170,7 @@ function DraggableComponent({
           activeWindow={activeWindow}
           onMoveComponent={onMoveComponent}
           rowDirection={comp.props?.layout?.direction || 'row'}
+          onNavigate={onNavigate}
         />
     ));
   };
@@ -180,6 +180,8 @@ function DraggableComponent({
   const sizing = comp.props?.sizing;
   const isWidthFill = sizing?.widthMode === 'fill';
   const isHeightFill = sizing?.heightMode === 'fill';
+  const isWidthHug = sizing?.widthMode === 'hug';
+  const isHeightHug = sizing?.heightMode === 'hug';
 
   if (isWidthFill) {
     sizingStyle.flexGrow = 1;
@@ -223,7 +225,14 @@ function DraggableComponent({
         ...sizingStyle,
         ...wrapperPadding,
       }}
-      onClick={e => { e.stopPropagation(); onSelect(comp.id); }}
+      onClick={e => { 
+        e.stopPropagation(); 
+        if ((e.ctrlKey || e.metaKey) && onNavigate) {
+            onNavigate(comp);
+        } else {
+            onSelect(comp.id); 
+        }
+      }}
       onKeyDown={handleKeyDown}
       tabIndex={0}
     >
@@ -258,14 +267,15 @@ function DraggableComponent({
         id={comp.id}
         selected={selectedId === comp.id}
         // Pass override sizing to the component
-        width={isWidthFill ? '100%' : comp.props.width}
-        height={isHeightFill ? '100%' : comp.props.height}
+        width={isWidthFill ? '100%' : (isWidthHug ? 'auto' : (comp.props.width || 'auto'))}
+        height={isHeightFill ? '100%' : (isHeightHug ? 'auto' : (comp.props.height || 'auto'))}
         // If Table and bound to database, override rows
         rows={comp.type === 'Table' && comp.props.dataSourceType === 'database' && comp.props.dataSource && database?.data?.[comp.props.dataSource] 
               ? database.data[comp.props.dataSource] 
               : comp.props.rows}
         onAddChild={isContainer ? type => onAddComponent(type, currentTopRowId, childCount, comp.id) : undefined}
         onMoveChild={isContainer ? item => onMoveComponent(item, currentTopRowId, childCount, comp.id) : undefined}
+        onNavigate={onNavigate}
       >
         {isContainer && renderContainerChildren()}
       </Component>
@@ -276,7 +286,7 @@ function DraggableComponent({
 // ─── Row of layout (with position-aware drop on empty area) ─────────────────
 function LayoutRow({
   row, rowIndex, selectedId, onSelect, onDelete, onDuplicate,
-  onAddComponent, activeWindow, onMoveComponent, onDropToRow, onSelectRow
+  onAddComponent, activeWindow, onMoveComponent, onDropToRow, onSelectRow, onNavigate
 }) {
   const layout = row.layout || { direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false };
   const rowRef = useRef(null);
@@ -399,6 +409,7 @@ function LayoutRow({
           onMoveComponent={onMoveComponent}
           rowDirection={layout.direction}
           topRowId={row.id}
+          onNavigate={onNavigate}
         />
       ))}
 
@@ -467,6 +478,7 @@ function Canvas({
   activeWindow,
   canvasPadding,
   database,
+  onNavigate
 }) {
   // Drop on empty canvas → new row
   const [{ isOver }, drop] = useDrop(() => ({
@@ -535,6 +547,7 @@ function Canvas({
                 onMoveComponent={onMoveComponent}
                 onDropToRow={onAddToRow}
                 onSelectRow={onSelectRow}
+                onNavigate={onNavigate}
               />
 
             {/* Between-row drop zone (after each row) */}

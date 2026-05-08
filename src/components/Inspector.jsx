@@ -1,9 +1,9 @@
 /**
- * Inspector.jsx — Con panel AutoLayout cuando se selecciona una ROW
+ * Inspector.jsx — With AutoLayout panel when a ROW is selected
  *
- * Cuando isRow=true, muestra controles de layout estilo Figma:
- * - Dirección (row / column)
- * - Gap (espaciado entre hijos)
+ * When isRow=true, shows layout controls:
+ * - Direction (row / column)
+ * - Gap (spacing between children)
  * - Align items (cross-axis)
  * - Justify content (main-axis)
  * - Wrap
@@ -472,11 +472,12 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
             </select>
           </div>
           {renderColor('TEXT COLOR','textColor','#00ff00')}
-          <div className="property-group"><label>LINK URL</label><input type="text" value={localProps.linkUrl||''} onChange={e => updateAndCommit('linkUrl', e.target.value)} placeholder="https://... (opcional)" /></div>
+          <div className="property-group"><label>LINK URL</label><input type="text" value={localProps.linkUrl||''} onChange={e => updateAndCommit('linkUrl', e.target.value)} placeholder="https://... (optional)" /></div>
         </>);
       }
       case 'Input':
       case 'TextBox': return (<>
+        <div className="property-group"><label>LABEL</label><input type="text" value={localProps.label||''} onChange={e => updateAndCommit('label', e.target.value)} placeholder="e.g. USERNAME" /></div>
         <div className="property-group"><label>PLACEHOLDER</label><input type="text" value={localProps.placeholder||''} onChange={e => updateAndCommit('placeholder', e.target.value)} /></div>
         {renderNumber('width','WIDTH (px)','150')}
         <div className="property-group"><label>INPUT TYPE</label>

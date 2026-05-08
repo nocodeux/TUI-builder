@@ -33,7 +33,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TEMAS
+   THEMES
    ═══════════════════════════════════════════════════════════════ */
 
 .theme-nano {
@@ -81,7 +81,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   LAYOUT PRINCIPAL
+   MAIN LAYOUT
    ═══════════════════════════════════════════════════════════════ */
 
 .app {
@@ -224,7 +224,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ROW SYSTEM — AutoLayout estilo Figma
+   ROW SYSTEM
    ═══════════════════════════════════════════════════════════════ */
 
 .layout-row {
@@ -245,7 +245,7 @@ body {
   background: rgba(255, 255, 0, 0.02);
 }
 
-/* Etiqueta de fila seleccionada */
+/* Selected row label */
 .row-label {
   position: absolute;
   top: -16px;
@@ -276,7 +276,7 @@ body {
   to { opacity: 1; }
 }
 
-/* Nueva fila drop zone */
+/* New row drop zone */
 .new-row-drop {
   height: 8px;
   border: 1px dashed transparent;
@@ -335,7 +335,7 @@ body {
 }
 
 .component-wrapper.selected > * {
-  /* El borde del wrapper ya indica selección */
+  /* The wrapper border already indicates selection */
 }
 
 .component-wrapper.window-hidden {
@@ -452,7 +452,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   AUTOLAYOUT PANEL (Inspector cuando hay ROW seleccionada)
+   AUTOLAYOUT PANEL (Inspector when ROW is selected)
    ═══════════════════════════════════════════════════════════════ */
 
 .autolayout-panel {
@@ -500,7 +500,7 @@ body {
   border-color: var(--accent) !important;
 }
 
-/* Preview del layout en el inspector */
+/* Layout preview in inspector */
 .al-preview {
   border: 1px solid var(--border);
   background: var(--selected);
@@ -547,7 +547,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   COMPONENTES RETRO
+   RETRO COMPONENTS
    ═══════════════════════════════════════════════════════════════ */
 
 .retro-button {
@@ -612,7 +612,7 @@ body {
   font-size: 11px;
 }
 
-/* Contenido interno de Frame — también usa flex para los hijos */
+/* Internal Frame content — also uses flex for children */
 .retro-frame-content {
   display: flex;
   flex-wrap: wrap;
@@ -645,7 +645,7 @@ body {
   font-size: 12px;
 }
 
-/* Contenido interno de Window */
+/* Internal Window content */
 .retro-window-content {
   display: flex;
   flex-wrap: wrap;
@@ -803,7 +803,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   MODALES
+   MODALS
    ═══════════════════════════════════════════════════════════════ */
 
 .projects-overlay,
@@ -850,24 +850,30 @@ body {
   font-family: monospace;
 }
 
-.modal-close {
-  background: #330000;
-  border: 1px solid #ff0000;
-  color: #ff6666;
+.modal-close,
+.uj-close,
+.retro-window-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
   font-family: monospace;
   font-size: 11px;
   cursor: pointer;
-  padding: 2px 8px;
-  width: 28px;
-  height: 28px;
+  padding: 0;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: all 0.15s;
 }
 
-.modal-close:hover {
-  background: #ff0000;
-  color: #000;
+.modal-close:hover,
+.uj-close:hover,
+.retro-window-close:hover {
+  background: var(--selected);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .modal-body {
@@ -943,17 +949,7 @@ body {
 }
 
 .uj-close {
-  background: #330000;
-  border: 1px solid #ff0000;
-  color: #ff6666;
-  padding: 2px 8px;
-  cursor: pointer;
-  font-family: monospace;
-}
-
-.uj-close:hover {
-  background: #ff0000;
-  color: #000;
+  /* Inherits from combined rule above */
 }
 
 .uj-content {
@@ -1209,7 +1205,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   INPUTS GLOBALES
+   GLOBAL INPUTS
    ═══════════════════════════════════════════════════════════════ */
 
 input,
@@ -1218,7 +1214,7 @@ textarea {
   caret-color: var(--accent);
 }
 
-/* Quitar flechas de number */
+/* Remove number arrows */
 input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
@@ -1230,7 +1226,7 @@ input[type="number"]::-webkit-inner-spin-button {
   margin: 0;
 }
 
-/* Scrollbar retro */
+/* Retro scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -1248,137 +1244,4 @@ input[type="number"]::-webkit-inner-spin-button {
   background: var(--text-dim);
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   USER JOURNEY PANEL
-   ═══════════════════════════════════════════════════════════════ */
 
-.user-journey-panel {
-  background: var(--panel-bg);
-  border-top: 1px solid var(--border);
-  z-index: 200;
-  display: flex;
-  flex-direction: column;
-  max-height: 180px;
-  box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
-  flex-shrink: 0;
-}
-
-.uj-header {
-  padding: 6px 12px;
-  background: var(--selected);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: var(--accent);
-}
-
-.uj-close {
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  font-family: monospace;
-}
-
-.uj-close:hover {
-  color: var(--accent);
-}
-
-.uj-content {
-  padding: 12px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  background: rgba(0,0,0,0.2);
-}
-
-.uj-screens-list {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.uj-screen-card {
-  width: 140px;
-  flex-shrink: 0;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  transition: all 0.2s;
-  position: relative;
-}
-
-.uj-screen-card:hover {
-  border-color: var(--text);
-}
-
-.uj-screen-card.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 10px rgba(255,255,0,0.2);
-}
-
-.uj-screen-thumb {
-  height: 70px;
-  width: 100%;
-  background: rgba(0,255,0,0.03);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-bottom: 1px solid var(--border);
-}
-
-.uj-screen-info {
-  padding: 6px 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.uj-screen-name {
-  font-size: 10px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 80px;
-}
-
-.uj-screen-delete {
-  font-size: 8px;
-  color: var(--text-dim);
-  background: transparent;
-  border: 1px solid var(--text-dim);
-  padding: 1px 4px;
-  cursor: pointer;
-}
-
-.uj-screen-delete:hover {
-  color: #ff4444;
-  border-color: #ff4444;
-}
-
-.uj-add-screen {
-  width: 140px;
-  height: 105px;
-  flex-shrink: 0;
-  border: 1px dashed var(--border);
-  background: transparent;
-  color: var(--text-dim);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.uj-add-screen:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: rgba(255,255,0,0.02);
-}
-
-.uj-add-screen span {
-  font-size: 9px;
-}

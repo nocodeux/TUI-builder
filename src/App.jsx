@@ -1,17 +1,17 @@
 /**
- * App.jsx — Modelo de datos con filas (rows) para AutoLayout estilo Figma
+ * App.jsx — Data model with rows for layout
  *
- * CAMBIOS PRINCIPALES:
- * - `components` ahora es `rows`: array de { id, layout, children }
+ * MAIN CHANGES:
+ * - `components` is now `rows`: array of { id, layout, children }
  * - addComponent → addToRow(type, rowId, index)
- * - addNewRow(type, existingItem, afterIndex) → crea nueva fila
- * - moveComponent(item, toRowId, toIndex) → reordena existentes
- * - Canvas y Inspector reciben `rows` y handlers actualizados
- * - Inspector muestra controles AutoLayout cuando se selecciona una ROW
+ * - addNewRow(type, existingItem, afterIndex) → creates a new row
+ * - moveComponent(item, toRowId, toIndex) → reorders existing components
+ * - Canvas and Inspector receive updated `rows` and handlers
+ * - Inspector shows AutoLayout controls when a ROW is selected
  */
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { DndProvider } from 'react-dnd';
+import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import Toolbox from './components/Toolbox';
 import Canvas from './components/Canvas';
@@ -56,9 +56,11 @@ function App() {
   const [activeWindow, setActiveWindow] = useState(null);
   const [database, setDatabase] = useState({ tables: [], data: {} });
   const [canvasPadding, setCanvasPadding] = useState({ top: 20, right: 20, bottom: 20, left: 20 });
-  
-  const isInitialLoading = useRef(true);
+  const [downloadLink, setDownloadLink] = useState(null);
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('nanostudio_api_key') || '');
+  const [apiUrl, setApiUrl] = useState(() => localStorage.getItem('nanostudio_api_url') || '');
 
+  const isInitialLoading = useRef(true);
   // ── Persistencia ──────────────────────────────────────────────────────────
   const triggerSave = useCallback(() => {
     if (isInitialLoading.current) return;
@@ -116,9 +118,9 @@ function App() {
     const targetScreen = screens.find(s => s.id === id);
     if (targetScreen && targetScreen.rows.length > 0) {
       setConfirmModal({
-        title: 'ELIMINAR PANTALLA',
-        message: `La pantalla "${targetScreen.name}" tiene elementos. ¿Estás seguro de que quieres eliminarla?`,
-        confirmText: 'Borrar pantalla',
+        title: 'DELETE SCREEN',
+        message: `The screen "${targetScreen.name}" has elements. Are you sure you want to delete it?`,
+        confirmText: 'Delete screen',
         onConfirm: () => {
           setScreens(prev => {
             const next = prev.filter(s => s.id !== id);
@@ -180,15 +182,15 @@ function App() {
     setRows(prev => cleanRows(prev));
   }, []);
 
-  // ── Defaults por tipo ────────────────────────────────────────────────────
+  // ── Defaults by type ────────────────────────────────────────────────────
   const getDefaultProps = type => ({
     Window: { title: 'Window1', width: 400, height: '', bgColor: '', textColor: '', borderColor: '', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
     Frame: { title: 'Frame1', width: 300, height: '', borderStyle: 'single', bgColor: '', textColor: '', borderColor: '', fontSize: 12, alignment: 'left', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
     Row: { layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fill', heightMode: 'hug' } },
     Button: { text: 'Button1', bgColor: '', textColor: '', borderColor: '', width: 80, disabled: false, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
-    Text: { text: 'Text1', textColor: '', fontSize: 12, alignment: 'left', linkUrl: '', sizing: { widthMode: 'hug', heightMode: 'hug' } },
-    Input: { placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '', borderColor: '', bgColor: '', inputType: 'text', sizing: { widthMode: 'fixed', heightMode: 'hug' } },
-    TextBox: { placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '', borderColor: '', bgColor: '', inputType: 'text', sizing: { widthMode: 'fixed', heightMode: 'hug' } },
+    Text: { text: 'Text', textColor: '', fontSize: 12, alignment: 'left', linkUrl: '', sizing: { widthMode: 'hug', heightMode: 'hug' } },
+    Input: { label: '', placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '', borderColor: '', bgColor: '', inputType: 'text', sizing: { widthMode: 'fixed', heightMode: 'hug' } },
+    TextBox: { label: '', placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '', borderColor: '', bgColor: '', inputType: 'text', sizing: { widthMode: 'fixed', heightMode: 'hug' } },
     CheckBox: { text: 'CheckBox1', checked: false, textColor: '', sizing: { widthMode: 'hug', heightMode: 'hug' } },
     RadioButton: { text: 'Option1', checked: false, group: 'group1', textColor: '', sizing: { widthMode: 'hug', heightMode: 'hug' } },
     ComboBox: { items: ['Option 1', 'Option 2', 'Option 3'], width: 150, selectedIndex: 0, textColor: '', borderColor: '', bgColor: '', sizing: { widthMode: 'fixed', heightMode: 'hug' } },
@@ -228,7 +230,7 @@ function App() {
     return { id: mkId(), type: canonicalType, props: getDefaultProps(canonicalType), children: [] };
   };
 
-  // ── Helpers recursivos ────────────────────────────────────────────────────
+  // ── Recursive helpers ────────────────────────────────────────────────────
   const findInRows = (rowsArr, id) => {
     for (const row of rowsArr) {
       if (row.id === id) return row;
@@ -436,7 +438,7 @@ function App() {
     children: normalizeComponentTree(row.children || [])
   }));
 
-  // ── Agregar componente a una fila existente ───────────────────────────────
+  // ── Add component to existing row ─────────────────────────────────────────
   const addToRow = useCallback((type, rowId, index, parentContainerId = null) => {
     console.log(`🚀 [DEBUG] addToRow: screen=${currentScreenId}, row=${rowId}, parent=${parentContainerId}, type=${type}`);
     const newComp = mkComp(type);
@@ -452,7 +454,7 @@ function App() {
     setSelectedId(newComp.id);
   }, [setRows]);
 
-  // ── Crear nueva fila ──────────────────────────────────────────────────────
+  // ── Create new row ────────────────────────────────────────────────────────
   const addNewRow = useCallback((type, existingItem = null, afterIndex = null, targetScreenId = currentScreenId) => {
     const newRow = { id: mkId(), layout: { ...DEFAULT_LAYOUT }, children: [] };
     if (type) {
@@ -474,7 +476,7 @@ function App() {
     else setSelectedId(newRow.id);
   }, [currentScreenId]);
 
-  // ── Mover componente existente ────────────────────────────────────────────
+  // ── Move existing component ───────────────────────────────────────────────
   const moveComponent = useCallback((item, toRowId, toIndex, newRowAfter = null) => {
     setRows(prev => {
       const source = findInRows(prev, item.id);
@@ -505,7 +507,7 @@ function App() {
     });
   }, [findInRows]);
 
-  // ── Actualizar props de componente ────────────────────────────────────────
+  // ── Update component props ────────────────────────────────────────────────
   const updateComponent = useCallback((id, newProps) => {
     setRows(prev => prev.map(row => {
       if (row.id === id) {
@@ -517,7 +519,7 @@ function App() {
     triggerSave();
   }, [triggerSave]);
 
-  // ── Eliminar componente ───────────────────────────────────────────────────
+  // ── Delete component ───────────────────────────────────────────────────────
   const deleteComponent = useCallback((id) => {
     setRows(prev => {
       // ¿Es una fila entera?
@@ -530,7 +532,7 @@ function App() {
     if (selectedId === id) setSelectedId(null);
   }, [selectedId]);
 
-  // ── Duplicar componente ───────────────────────────────────────────────────
+  // ── Duplicate component ────────────────────────────────────────────────────
   const duplicateComponent = useCallback((id) => {
     let newSelectedId = null;
 
@@ -554,16 +556,36 @@ function App() {
       return [comp];
     });
 
-    setRows(prev => prev.map(row => ({ ...row, children: duplicateTree(row.children) })));
+    setScreens(prev => prev.map(s => {
+      if (s.id !== currentScreenId) return s;
+      
+      // Check if ID is a row
+      const isRow = s.rows.some(r => r.id === id);
+      if (isRow) {
+        const nextRows = s.rows.flatMap(row => {
+          if (row.id === id) {
+            const duplicate = { ...row, id: mkId(), children: row.children.map(cloneTree) };
+            newSelectedId = duplicate.id;
+            return [row, duplicate];
+          }
+          return [row];
+        });
+        return { ...s, rows: nextRows };
+      }
+
+      // It's a component deep inside
+      return { ...s, rows: s.rows.map(row => ({ ...row, children: duplicateTree(row.children) })) };
+    }));
+
     if (newSelectedId) setSelectedId(newSelectedId);
-  }, []);
+  }, [currentScreenId]);
 
   // ── Seleccionar fila ──────────────────────────────────────────────────────
   const selectRow = useCallback((rowId) => {
     setSelectedId(rowId);
   }, []);
 
-  // ── Encontrar elemento seleccionado ──────────────────────────────────────
+  // ── Find selected element ──────────────────────────────────────────────────
   const findSelected = () => {
     if (!selectedId) return null;
     return findInRows(rows, selectedId);
@@ -595,6 +617,9 @@ function App() {
     localStorage.setItem('nanostudio_builder_name', builderName); 
     document.title = builderName;
   }, [builderName]);
+
+  useEffect(() => { localStorage.setItem('nanostudio_api_key', apiKey); }, [apiKey]);
+  useEffect(() => { localStorage.setItem('nanostudio_api_url', apiUrl); }, [apiUrl]);
 
   useEffect(() => {
     isInitialLoading.current = true;
@@ -643,6 +668,21 @@ function App() {
     ...collectByType(comp.children || [], type)
   ]);
   const getWindows = () => rows.flatMap(r => collectByType(r.children, 'Window'));
+
+  const handleNavigate = useCallback((comp) => {
+    const p = comp.props || {};
+    if (p.action === 'screen' && p.targetScreenId) {
+      setCurrentScreenId(p.targetScreenId);
+      setSelectedId(null);
+    } else if (p.action === 'navigate' && p.targetWindow) {
+      setSelectedId(p.targetWindow);
+    } else if (p.action === 'external' && p.href) {
+      window.open(p.href, '_blank');
+    } else if (p.action === 'email' && p.mailto) {
+      window.location.href = `mailto:${p.mailto}`;
+    }
+  }, [setCurrentScreenId, setSelectedId]);
+
   const getProjectList = () => {
     const keys = Object.keys(localStorage).filter(k => k.startsWith('nanostudio_project_'));
     return keys.map(k => { try { const d = JSON.parse(localStorage.getItem(k)); return { id: k.replace('nanostudio_project_', ''), ...d }; } catch { return null; } }).filter(Boolean);
@@ -696,6 +736,9 @@ function App() {
     const p = comp.props || {};
     const isWidthFill = p.sizing?.widthMode === 'fill';
     const isHeightFill = p.sizing?.heightMode === 'fill';
+    const isWidthHug = p.sizing?.widthMode === 'hug';
+    const isHeightHug = p.sizing?.heightMode === 'hug';
+
     const renderChildren = () => (comp.children || []).map(renderComponentExport).join('');
 
     const wrapComponent = (innerHtml) => {
@@ -724,13 +767,13 @@ function App() {
         
         let closeBtnHtml = '';
         if (p.showClose && p.closeNextScreenId) {
-          closeBtnHtml = `<button class="retro-window-close" style="background:none; border:none; color:inherit; cursor:pointer; font-size:12px; font-weight:bold; padding:0 4px; font-family:monospace;" onclick="goToScreen('${p.closeNextScreenId}')">[X]</button>`;
+          closeBtnHtml = `<button class="retro-window-close" onclick="goToScreen('${p.closeNextScreenId}')">X</button>`;
         }
 
         const html = `<div class="retro-window" style="${styleObjToString({
-          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '100%'),
-          minHeight: isHeightFill ? '100%' : (p.height ? `${p.height}px` : ''),
-          height: isHeightFill ? '100%' : 'auto',
+          width: isWidthFill ? '100%' : (isWidthHug ? 'auto' : (p.width ? `${p.width}px` : '100%')),
+          minHeight: isHeightFill ? '100%' : (isHeightHug ? 'auto' : (p.height ? `${p.height}px` : '')),
+          height: isHeightFill ? '100%' : (isHeightHug ? 'auto' : 'auto'),
           background: getThemeColor(p.bgColor, '--bg'),
           borderColor: getThemeColor(p.borderColor, '--border'),
         })}"><div class="retro-window-titlebar"><span class="retro-window-title" style="color:${getThemeColor(p.textColor, '--accent')}">${escapeHtml(p.title)}</span>${closeBtnHtml}</div><div class="retro-window-content" style="${styleObjToString(paddedStyles)}">${renderChildren()}</div></div>`;
@@ -760,7 +803,7 @@ function App() {
       }
       case 'Button': {
         const btnStyle = styleObjToString({
-          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : 'auto'),
+          width: isWidthFill ? '100%' : (isWidthHug ? 'auto' : (p.width ? `${p.width}px` : 'auto')),
           background: getThemeColor(p.bgColor, '--bg'),
           color: getThemeColor(p.textColor, '--text'),
           borderColor: getThemeColor(p.borderColor, '--text'),
@@ -816,14 +859,23 @@ function App() {
         return html;
       }
       case 'Input':
-      case 'TextBox':
-        return wrapComponent(`<input class="retro-textbox" type="${p.inputType || 'text'}" placeholder="${escapeHtml(p.placeholder)}" style="${styleObjToString({
-          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '100%'),
-          height: isHeightFill ? '100%' : 'auto',
+      case 'TextBox': {
+        const inputHtml = `<input class="retro-textbox" type="${p.inputType || 'text'}" placeholder="${escapeHtml(p.placeholder)}" style="${styleObjToString({
+          width: '100%',
           borderColor: getThemeColor(p.borderColor, '--text'),
           color: getThemeColor(p.textColor, '--text'),
           background: getThemeColor(p.bgColor, '--input-bg'),
-        })}" ${p.readOnly ? '' : ''} ${p.disabled ? '' : ''} />`);
+        })}" ${p.readOnly ? 'readonly' : ''} ${p.disabled ? 'disabled' : ''} />`;
+
+        const finalHtml = p.label 
+          ? `<div class="property-group" style="width: ${isWidthFill ? '100%' : (p.width ? `${p.width}px` : '100%')};">
+               <label>${escapeHtml(p.label)}</label>
+               ${inputHtml}
+             </div>`
+          : inputHtml;
+
+        return wrapComponent(finalHtml);
+      }
       case 'CheckBox':
         return wrapComponent(`<label class="retro-checkbox" style="color:${getThemeColor(p.textColor, '--text')};"><input type="checkbox" ${p.checked ? 'checked' : ''} /><span>${escapeHtml(p.text)}</span></label>`);
       case 'RadioButton':
@@ -945,16 +997,49 @@ function App() {
   };
 
   const downloadFile = (filename, content, type) => {
-    const blob = new Blob([content], { type });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    console.log('--- downloadFile starting ---');
+    try {
+      if (content instanceof Blob) {
+        console.log('Content is Blob');
+        const url = URL.createObjectURL(content);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 5000);
+        return;
+      }
+
+      const a = document.createElement('a');
+      if (typeof content === 'string' && content.startsWith('data:')) {
+        console.log('Content is direct data URI');
+        a.href = content;
+      } else {
+        console.log('Content is string, using base64 encoding');
+        const base64 = btoa(unescape(encodeURIComponent(content)));
+        a.href = `data:${type};base64,${base64}`;
+      }
+      
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Error in downloadFile:', err);
+    }
   };
 
   const exportHTML = () => {
-    const t = THEMES[theme];
+    console.log('--- exportHTML starting ---');
+    console.log('Current Project:', currentProject);
+    console.log('Screens count:', screens.length);
+    
+    try {
+      const t = THEMES[theme];
     
     const screensHtml = screens.map((screen, sIdx) => {
       const isSingleWindow = screen.rows.length === 1 && screen.rows[0].children.length === 1 && screen.rows[0].children[0].type === 'Window';
@@ -987,7 +1072,8 @@ function App() {
     }).join('');
 
     const dotColor = (t.accent || '#00aa00').replace('#', '%23');
-    const css = `${appCss}
+    const baseCss = typeof appCss === 'string' ? appCss : '';
+    const css = `${baseCss}
 body { 
   overflow: auto !important; 
   min-height: 100vh; 
@@ -1027,6 +1113,50 @@ body {
 .retro-window, .retro-frame {
   background: ${t.bg} !important;
 }
+.retro-window-titlebar {
+  background: ${t.selected || 'rgba(0,170,0,0.1)'};
+  border-bottom: 1px solid ${t.border};
+  padding: 4px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.retro-window-title {
+  color: ${t.accent};
+  font-size: 12px;
+  font-weight: bold;
+  font-family: monospace;
+}
+.retro-window-close {
+  background: transparent;
+  border: 1px solid ${t.border};
+  color: ${t.textDim || t.text};
+  font-family: monospace;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.property-group label {
+  display: block;
+  font-size: 11px;
+  color: ${t.accent};
+  margin-bottom: 4px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+.retro-textbox {
+  background: ${t.inputBg || 'rgba(0,0,0,0.3)'};
+  border: 1px solid ${t.border};
+  color: ${t.text};
+  padding: 4px 8px;
+  font-family: monospace;
+  font-size: 12px;
+}
 .layout-row, .export-wrapper, .retro-window, .retro-window-content, .retro-frame, .retro-frame-content, .retro-row { min-width: 0; }
 .export-wrapper > * { max-width: 100%; }
 .export-wrapper { padding: 0 !important; border: none !important; outline: none !important; }
@@ -1038,7 +1168,7 @@ body {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(currentProject.name)}</title>
+<title>${escapeHtml(currentProject.name || 'Prototype')}</title>
 <style>
 ${css}
 </style>
@@ -1092,8 +1222,19 @@ ${css}
 </body>
 </html>`;
 
-    const baseName = `${currentProject.name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'project'}`;
+    console.log('Final HTML length:', html.length);
+    const baseName = `${currentProject.name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_\-]/g, '') || 'project'}`;
+    console.log('Base name for file:', baseName);
+    
+    // Log full HTML for agent to "deploy"
+    console.log('--- DEPLOY_START ---');
+    console.log(html);
+    console.log('--- DEPLOY_END ---');
+
     downloadFile(`${baseName}.html`, html, 'text/html');
+    } catch (err) {
+      console.error('Error in exportHTML:', err);
+    }
   };
 
   const newProject = () => {
@@ -1196,6 +1337,7 @@ ${css}
               activeWindow={activeWindow}
               canvasPadding={canvasPadding}
               database={database}
+              onNavigate={handleNavigate}
             />
 
             {showUserJourney && (
@@ -1306,7 +1448,9 @@ ${css}
                     </div>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button className="small-btn" onClick={() => loadProject(proj.id)}>Load</button>
-                      <button className="small-btn danger" onClick={() => deleteProject(proj.id)}>X</button>
+                      <button className="small-btn danger" onClick={() => deleteProject(proj.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, padding: 0 }}>
+                        <TrashIcon />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -1335,6 +1479,37 @@ ${css}
                     style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '8px', width: '100%', fontFamily: 'monospace' }}
                   />
                 </div>
+
+                <div style={{ marginTop: 24 }}>
+                  <div className="retro-frame" style={{ padding: '12px', border: '1px solid var(--border)', position: 'relative' }}>
+                    <div style={{ position: 'absolute', top: '-10px', left: '10px', background: 'var(--panel-bg)', padding: '0 5px', fontSize: '11px', color: 'var(--accent)' }}>Backend</div>
+                    
+                    <div style={{ fontSize: '12px', color: 'var(--text)', marginBottom: '15px' }}>Connect to backend.</div>
+                    
+                    <div className="property-group" style={{ marginBottom: '12px' }}>
+                      <label>API KEY:</label>
+                      <input 
+                        type="text" 
+                        value={apiKey} 
+                        onChange={e => setApiKey(e.target.value)} 
+                        placeholder="Enter API KEY..."
+                        style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px', width: '100%', fontFamily: 'monospace' }}
+                      />
+                    </div>
+                    
+                    <div className="property-group">
+                      <label>API Public URL:</label>
+                      <input 
+                        type="text" 
+                        value={apiUrl} 
+                        onChange={e => setApiUrl(e.target.value)} 
+                        placeholder="Enter public URL..."
+                        style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px', width: '100%', fontFamily: 'monospace' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div style={{ marginTop: 24, textAlign: 'center' }}>
                   <button className="modal-action-btn" onClick={() => setShowSettings(false)}>Close</button>
                 </div>
@@ -1382,7 +1557,7 @@ ${css}
                 onClick={() => setConfirmModal(null)}
                 style={{ padding: '6px 16px' }}
               >
-                Cancelar
+                Cancel
               </button>
               <button 
                 className="toolbar-btn" 
@@ -1394,7 +1569,7 @@ ${css}
                   borderColor: 'var(--accent)'
                 }}
               >
-                {confirmModal.confirmText || 'Confirmar'}
+                {confirmModal.confirmText || 'Confirm'}
               </button>
             </div>
           </div>
@@ -1404,11 +1579,14 @@ ${css}
   );
 }
 
-// ─── Componentes Auxiliares para User Journey ──────────────────────────────
+const TrashIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
+    <path d="M18 6L17.1991 18.0129C17.129 19.065 17.0939 19.5911 16.8667 19.99C16.6666 20.3412 16.3648 20.6235 16.0011 20.7998C15.588 21 15.0607 21 14.0062 21H9.99377C8.93927 21 8.41202 21 7.99889 20.7998C7.63517 20.6235 7.33339 20.3412 7.13332 19.99C6.90607 19.5911 6.871 19.065 6.80086 18.0129L6 6M4 6H20M16 6L15.7294 5.18807C15.4671 4.40125 15.3359 4.00784 15.0927 3.71698C14.8779 3.46013 14.6021 3.26132 14.2905 3.13878C13.9376 3 13.523 3 12.6936 3H11.3064C10.477 3 10.0624 3 9.70951 3.13878C9.39792 3.26132 9.12208 3.46013 8.90729 3.71698C8.66405 4.00784 8.53292 4.40125 8.27064 5.18807L8 6M14 10V17M10 10V17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
 
-// ─── Componentes Auxiliares para User Journey ──────────────────────────────
+// ─── User Journey Auxiliary Components ──────────────────────────────────────
 
-import { useDrag, useDrop } from 'react-dnd';
 
 function DraggableScreenCard({ screen, index, currentScreenId, onSelect, onDelete, onMove }) {
   const ref = React.useRef(null);

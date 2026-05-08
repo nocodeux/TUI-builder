@@ -5,11 +5,12 @@ const getThemeColor = (val, themeVar) => {
   return val;
 };
 
-function Button({ text = 'Button1', bgColor = '', textColor = '', borderColor = '', width = 80, disabled = false }) {
+function Button({ text = 'Button1', bgColor = '', textColor = '', borderColor = '', width = 80, disabled = false, onClick }) {
   return (
     <button
       className="retro-button"
       disabled={disabled}
+      onClick={onClick}
       style={{
         width: typeof width === 'string' && width.includes('%') ? width : (width ? `${width}px` : 'auto'),
         '--button-bg': bgColor || 'transparent',

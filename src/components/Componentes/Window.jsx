@@ -20,7 +20,8 @@ function Window({
   onMoveChild,
   id,
   showClose = false,
-  closeNextScreenId = null
+  closeNextScreenId = null,
+  onNavigate
 }) {
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ['COMPONENT', 'EXISTING_COMPONENT'],
@@ -63,19 +64,14 @@ function Window({
         {showClose && (
           <button 
             className="retro-window-close"
-            style={{ 
-              background: 'none', 
-              border: 'none', 
-              color: 'inherit', 
-              cursor: 'pointer',
-              fontSize: 14,
-              fontWeight: 'bold',
-              padding: '0 8px',
-              fontFamily: 'monospace',
-              flexShrink: 0
+            onClick={(e) => {
+              if ((e.metaKey || e.ctrlKey) && onNavigate && closeNextScreenId) {
+                e.stopPropagation();
+                onNavigate({ props: { action: 'screen', targetScreenId: closeNextScreenId } });
+              }
             }}
           >
-            [X]
+            X
           </button>
         )}
       </div>
