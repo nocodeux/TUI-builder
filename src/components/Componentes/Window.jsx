@@ -18,7 +18,9 @@ function Window({
   children,
   onAddChild,
   onMoveChild,
-  id
+  id,
+  showClose = false,
+  closeNextScreenId = null
 }) {
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ['COMPONENT', 'EXISTING_COMPONENT'],
@@ -26,7 +28,7 @@ function Window({
       // Si ya fue manejado por un hijo (Frame anidado, etc), no hacer nada
       if (monitor.didDrop()) return;
 
-      if (item.type !== undefined) {
+      if (item.id === undefined) {
         // Viene del Toolbox — agregar como hijo de este Window
         if (onAddChild) onAddChild(item.type);
       } else if (item.id && onMoveChild) {
@@ -51,13 +53,31 @@ function Window({
         borderColor: borderColor || 'var(--border)',
       }}
     >
-      <div className="retro-window-titlebar">
+      <div className="retro-window-titlebar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span
           className="retro-window-title"
-          style={{ color: textColor || 'var(--accent)' }}
+          style={{ color: textColor || 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}
         >
           {title}
         </span>
+        {showClose && (
+          <button 
+            className="retro-window-close"
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              color: 'inherit', 
+              cursor: 'pointer',
+              fontSize: 14,
+              fontWeight: 'bold',
+              padding: '0 8px',
+              fontFamily: 'monospace',
+              flexShrink: 0
+            }}
+          >
+            [X]
+          </button>
+        )}
       </div>
       <div
         className="retro-window-content"

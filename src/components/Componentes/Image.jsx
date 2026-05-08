@@ -5,64 +5,86 @@ const getThemeColor = (val, themeVar) => {
   return val;
 };
 
-function Image({ src = '', width = 80, height = 80, alt = 'Image', iconSrc = '', iconColor = '' }) {
-  // If we have a URL, render the image
-  if (src) {
-    return (
-      <img
-        src={src}
-        alt={alt}
-        style={{ 
-          width: typeof width === 'string' && width.includes('%') ? width : `${width}px`, 
-          height: typeof height === 'string' && height.includes('%') ? height : `${height}px`, 
-          border: '1px solid var(--border)' 
-        }}
-      />
-    );
-  }
+function Image({ 
+  src = '', 
+  width = 80, 
+  height = 80, 
+  alt = 'Image', 
+  iconSrc = '', 
+  iconColor = '', 
+  borderThickness = 1, 
+  borderColor = '',
+  sizing = {}
+}) {
+  const isSvg = src.toLowerCase().endsWith('.svg') || src.startsWith('data:image/svg+xml');
+  const bThick = borderThickness !== undefined ? borderThickness : 1;
+  const bColor = getThemeColor(borderColor, '--border');
+  
+  const containerStyle = {
+    width: sizing.widthMode === 'fill' ? '100%' : `${width}px`,
+    height: sizing.heightMode === 'fill' ? '100%' : `${height}px`,
+    border: bThick > 0 ? `${bThick}px solid ${bColor}` : 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: 'transparent'
+  };
 
-  // If we have a selected icon, render it inline
+  const finalIconColor = getThemeColor(iconColor, '--accent');
+
+  // Si hay iconSrc (de la librería interna), lo priorizamos
   if (iconSrc) {
     return (
-      <div style={{
-        width: typeof width === 'string' && width.includes('%') ? width : `${width}px`,
-        height: typeof height === 'string' && height.includes('%') ? height : `${height}px`,
-        border: '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'var(--bg)',
-        color: getThemeColor(iconColor, '--text'),
-        padding: 4,
-      }}>
-        <div
+      <div style={containerStyle} className="image-icon-render">
+        <div 
+          style={{ width: '100%', height: '100%', color: finalIconColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10%' }}
           dangerouslySetInnerHTML={{ __html: iconSrc }}
-          style={{
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: getThemeColor(iconColor, '--text'),
-          }}
-          className="image-icon-render"
         />
       </div>
     );
   }
 
-  // Empty placeholder
+  // Si es un SVG por URL/DataURI y tenemos color, usamos MASK para poder teñirlo
+  if (isSvg && iconColor) {
+    return (
+      <div style={containerStyle}>
+        <div style={{
+          width: '100%',
+          height: '100%',
+          backgroundColor: finalIconColor,
+          maskImage: `url("${src}")`,
+          maskRepeat: 'no-repeat',
+          maskPosition: 'center',
+          maskSize: 'contain',
+          WebkitMaskImage: `url("${src}")`,
+          WebkitMaskRepeat: 'no-repeat',
+          WebkitMaskPosition: 'center',
+          WebkitMaskSize: 'contain',
+        }} />
+      </div>
+    );
+  }
+
+  // Comportamiento normal para imágenes
   return (
-    <div style={{
-      width: typeof width === 'string' && width.includes('%') ? width : `${width}px`,
-      height: typeof height === 'string' && height.includes('%') ? height : `${height}px`,
-      border: '1px solid var(--border)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: 'var(--bg)'
-    }}>
-      <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>[IMG {width}x{height}]</span>
+    <div style={containerStyle}>
+      {src ? (
+        <img 
+          src={src} 
+          alt={alt} 
+          style={{ 
+            width: '100%', 
+            height: '100%', 
+            objectFit: 'contain' 
+          }} 
+        />
+      ) : (
+        <div style={{ fontSize: '10px', color: 'var(--text-dim)', textAlign: 'center', padding: '4px' }}>
+          [IMG {width}x{height}]
+        </div>
+      )}
     </div>
   );
 }

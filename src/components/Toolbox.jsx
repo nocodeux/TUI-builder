@@ -6,7 +6,7 @@ const componentes = [
   { type: 'Frame', label: 'Frame' },
   { type: 'Row', label: 'Row' },
   { type: 'Button', label: 'Button' },
-  { type: 'Label', label: 'Label' },
+  { type: 'Text', label: 'Text' },
   { type: 'Input', label: 'Input' },
   { type: 'CheckBox', label: 'CheckBox' },
   { type: 'RadioButton', label: 'RadioButton' },

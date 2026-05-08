@@ -10,7 +10,7 @@
  * - Inspector muestra controles AutoLayout cuando se selecciona una ROW
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import Toolbox from './components/Toolbox';
@@ -35,7 +35,119 @@ const DEFAULT_LAYOUT = {
 const mkId = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
 
 function App() {
-  const [rows, setRows] = useState([]);           // [ { id, layout, children } ]
+  const [screens, setScreens] = useState([
+    { id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }
+  ]);
+  const [currentScreenId, setCurrentScreenId] = useState('screen-1');
+  const [selectedId, setSelectedId] = useState(null);
+  const [viewMode, setViewMode] = useState('desktop');
+  const [theme, setTheme] = useState(() => localStorage.getItem('nanostudio_theme') || 'theme-nano');
+  const [showUserJourney, setShowUserJourney] = useState(false);
+  const [showProjects, setShowProjects] = useState(false);
+  const [showDatabase, setShowDatabase] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [confirmModal, setConfirmModal] = useState(null);
+  const [builderName, setBuilderName] = useState(() => localStorage.getItem('nanostudio_builder_name') || 'TUI Builder');
+  const [currentProject, setCurrentProject] = useState(() => {
+    const saved = localStorage.getItem('nanostudio_current_project');
+    return saved ? JSON.parse(saved) : { id: 'default', name: 'Untitled' };
+  });
+  const [saveStatus, setSaveStatus] = useState('');
+  const [activeWindow, setActiveWindow] = useState(null);
+  const [database, setDatabase] = useState({ tables: [], data: {} });
+  const [canvasPadding, setCanvasPadding] = useState({ top: 20, right: 20, bottom: 20, left: 20 });
+  
+  const isInitialLoading = useRef(true);
+
+  // ── Persistencia ──────────────────────────────────────────────────────────
+  const triggerSave = useCallback(() => {
+    if (isInitialLoading.current) return;
+    setSaveStatus('Saving...');
+    requestAnimationFrame(() => {
+      const projectData = { 
+        name: currentProject.name, 
+        theme, 
+        viewMode, 
+        screens, 
+        currentScreenId,
+        activeWindow, 
+        database, 
+        modified: new Date().toISOString() 
+      };
+      localStorage.setItem(`nanostudio_project_${currentProject.id}`, JSON.stringify(projectData));
+      localStorage.setItem('nanostudio_current_project', JSON.stringify(currentProject));
+      setSaveStatus('Saved');
+      setTimeout(() => setSaveStatus(''), 800);
+    });
+  }, [screens, currentScreenId, database, currentProject, theme, viewMode, activeWindow]);
+
+  // Helper to get active screen
+  const activeScreen = screens.find(s => s.id === currentScreenId) || screens[0];
+  const rows = activeScreen.rows;
+
+  // Wrapped setRows to update the active screen in the screens array
+  const setRows = useCallback((newRowsOrFn) => {
+    setScreens(prev => prev.map(s => {
+      if (s.id === currentScreenId) {
+        const nextRows = typeof newRowsOrFn === 'function' ? newRowsOrFn(s.rows) : newRowsOrFn;
+        return { ...s, rows: nextRows };
+      }
+      return s;
+    }));
+  }, [currentScreenId]);
+
+  const moveScreen = useCallback((dragIndex, hoverIndex) => {
+    setScreens(prev => {
+      const next = [...prev];
+      const [dragged] = next.splice(dragIndex, 1);
+      next.splice(hoverIndex, 0, dragged);
+      return next;
+    });
+  }, []);
+
+  const addScreen = useCallback(() => {
+    const newScreen = { id: mkId(), name: `Screen ${screens.length + 1}`, rows: [], settings: { timeout: 0, nextScreenId: null } };
+    setScreens(prev => [...prev, newScreen]);
+    setCurrentScreenId(newScreen.id);
+  }, [screens.length]);
+
+  const deleteScreen = useCallback((id) => {
+    if (screens.length <= 1) return;
+    const targetScreen = screens.find(s => s.id === id);
+    if (targetScreen && targetScreen.rows.length > 0) {
+      setConfirmModal({
+        title: 'ELIMINAR PANTALLA',
+        message: `La pantalla "${targetScreen.name}" tiene elementos. ¿Estás seguro de que quieres eliminarla?`,
+        confirmText: 'Borrar pantalla',
+        onConfirm: () => {
+          setScreens(prev => {
+            const next = prev.filter(s => s.id !== id);
+            if (currentScreenId === id) setCurrentScreenId(next[0].id);
+            return next;
+          });
+          setConfirmModal(null);
+        }
+      });
+      return;
+    }
+    setScreens(prev => {
+      const next = prev.filter(s => s.id !== id);
+      if (currentScreenId === id) setCurrentScreenId(next[0].id);
+      return next;
+    });
+  }, [screens, currentScreenId]);
+
+  const updateScreen = useCallback((id, updates) => {
+    setScreens(prev => prev.map(s => {
+      if (s.id === id) {
+        if (updates.settings) {
+          return { ...s, settings: { ...(s.settings || {}), ...updates.settings } };
+        }
+        return { ...s, ...updates };
+      }
+      return s;
+    }));
+  }, []);
 
   // ── Color Migration for Existing Components ──────────────────────────────
   useEffect(() => {
@@ -68,27 +180,13 @@ function App() {
     setRows(prev => cleanRows(prev));
   }, []);
 
-  const [selectedId, setSelectedId] = useState(null);
-  const [viewMode, setViewMode] = useState('desktop');
-  const [theme, setTheme] = useState(() => localStorage.getItem('nanostudio_theme') || 'theme-nano');
-  const [showProjects, setShowProjects] = useState(false);
-  const [showDatabase, setShowDatabase] = useState(false);
-  const [currentProject, setCurrentProject] = useState(() => {
-    const saved = localStorage.getItem('nanostudio_current_project');
-    return saved ? JSON.parse(saved) : { id: 'default', name: 'Untitled' };
-  });
-  const [saveStatus, setSaveStatus] = useState('');
-  const [activeWindow, setActiveWindow] = useState(null);
-  const [database, setDatabase] = useState({ tables: [], data: {} });
-  const [canvasPadding, setCanvasPadding] = useState({ top: 20, right: 20, bottom: 20, left: 20 });
-
   // ── Defaults por tipo ────────────────────────────────────────────────────
   const getDefaultProps = type => ({
     Window: { title: 'Window1', width: 400, height: '', bgColor: '', textColor: '', borderColor: '', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
-    Frame: { title: 'Frame1', width: 300, height: '', borderStyle: 'single', bgColor: '', textColor: '', borderColor: '', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
+    Frame: { title: 'Frame1', width: 300, height: '', borderStyle: 'single', bgColor: '', textColor: '', borderColor: '', fontSize: 12, alignment: 'left', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
     Row: { layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fill', heightMode: 'hug' } },
     Button: { text: 'Button1', bgColor: '', textColor: '', borderColor: '', width: 80, disabled: false, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
-    Label: { text: 'Label1', textColor: '', fontSize: 12, alignment: 'left', linkUrl: '', sizing: { widthMode: 'hug', heightMode: 'hug' } },
+    Text: { text: 'Text1', textColor: '', fontSize: 12, alignment: 'left', linkUrl: '', sizing: { widthMode: 'hug', heightMode: 'hug' } },
     Input: { placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '', borderColor: '', bgColor: '', inputType: 'text', sizing: { widthMode: 'fixed', heightMode: 'hug' } },
     TextBox: { placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '', borderColor: '', bgColor: '', inputType: 'text', sizing: { widthMode: 'fixed', heightMode: 'hug' } },
     CheckBox: { text: 'CheckBox1', checked: false, textColor: '', sizing: { widthMode: 'hug', heightMode: 'hug' } },
@@ -100,8 +198,8 @@ function App() {
     Timer: { interval: 1000, enabled: false, sizing: { widthMode: 'hug', heightMode: 'hug' } },
     PictureBox: { width: 150, height: 100, stretch: false, border: true, borderColor: '', sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
     Shape: { shapeType: 'rectangle', width: 60, height: 40, borderColor: '', bgColor: '', fill: false, sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
-    Line: { color: '', thickness: 1, fullWidth: true, widthPercent: 100, sizing: { widthMode: 'fill', heightMode: 'hug' } },
-    Image: { src: '', width: 80, height: 80, alt: 'Image', iconSrc: '', iconColor: '', sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
+    Line: { color: '', thickness: 1, fullWidth: true, widthPercent: 100, lineStyle: 'solid', sizing: { widthMode: 'fill', heightMode: 'hug' } },
+    Image: { src: '', width: 80, height: 80, alt: 'Image', iconSrc: '', iconColor: '', borderThickness: 1, borderColor: '', sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
     Table: {
       columns: [
         { name: 'ID', type: 'number', width: 60 },
@@ -126,7 +224,7 @@ function App() {
   }[type] || { text: type });
 
   const mkComp = type => {
-    const canonicalType = type === 'TextBox' ? 'Input' : type;
+    const canonicalType = (type === 'TextBox' ? 'Input' : (type === 'Label' ? 'Text' : type));
     return { id: mkId(), type: canonicalType, props: getDefaultProps(canonicalType), children: [] };
   };
 
@@ -191,19 +289,21 @@ function App() {
   const deleteCompRecursive = (comps, id) =>
     comps.filter(c => c.id !== id).map(c => ({ ...c, children: c.children ? deleteCompRecursive(c.children, id) : c.children }));
 
-  const addToCompChildren = (comps, parentId, newComp, index = null) =>
-    comps.map(c => c.id === parentId
-      ? {
-          ...c,
-          children: (() => {
-            const nextChildren = [...(c.children || [])];
-            const insertAt = index === null ? nextChildren.length : Math.min(Math.max(index, 0), nextChildren.length);
-            nextChildren.splice(insertAt, 0, newComp);
-            return nextChildren;
-          })()
-        }
-      : { ...c, children: c.children ? addToCompChildren(c.children, parentId, newComp, index) : c.children }
-    );
+  const addToCompChildren = (comps, parentId, newComp, index = null) => {
+    console.log(`[addToCompChildren] Looking for ${parentId} in`, comps.map(c => c.id));
+    return comps.map(c => {
+      if (c.id === parentId) {
+        const nextChildren = [...(c.children || [])];
+        const insertAt = index === null ? nextChildren.length : Math.min(Math.max(index, 0), nextChildren.length);
+        nextChildren.splice(insertAt, 0, newComp);
+        return { ...c, children: nextChildren };
+      }
+      if (c.children && c.children.length > 0) {
+        return { ...c, children: addToCompChildren(c.children, parentId, newComp, index) };
+      }
+      return c;
+    });
+  };
 
   const removeCompRecursive = (comps, id, parentId) => {
     for (let i = 0; i < comps.length; i += 1) {
@@ -338,11 +438,11 @@ function App() {
 
   // ── Agregar componente a una fila existente ───────────────────────────────
   const addToRow = useCallback((type, rowId, index, parentContainerId = null) => {
+    console.log(`🚀 [DEBUG] addToRow: screen=${currentScreenId}, row=${rowId}, parent=${parentContainerId}, type=${type}`);
     const newComp = mkComp(type);
     setRows(prev => prev.map(row => {
       if (row.id !== rowId) return row;
       if (parentContainerId) {
-        // Agregar dentro de un Window/Frame que está en esta fila
         return { ...row, children: addToCompChildren(row.children, parentContainerId, newComp, index) };
       }
       const newChildren = [...row.children];
@@ -350,25 +450,29 @@ function App() {
       return { ...row, children: newChildren };
     }));
     setSelectedId(newComp.id);
-  }, []);
+  }, [setRows]);
 
   // ── Crear nueva fila ──────────────────────────────────────────────────────
-  const addNewRow = useCallback((type, existingItem = null, afterIndex = null) => {
+  const addNewRow = useCallback((type, existingItem = null, afterIndex = null, targetScreenId = currentScreenId) => {
     const newRow = { id: mkId(), layout: { ...DEFAULT_LAYOUT }, children: [] };
     if (type) {
       newRow.children = [mkComp(type)];
     }
-    setRows(prev => {
-      if (afterIndex !== null) {
-        const next = [...prev];
-        next.splice(afterIndex, 0, newRow);
-        return next;
+    setScreens(prevScreens => prevScreens.map(s => {
+      if (s.id === targetScreenId) {
+        const currentRows = s.rows;
+        if (afterIndex !== null) {
+          const next = [...currentRows];
+          next.splice(afterIndex, 0, newRow);
+          return { ...s, rows: next };
+        }
+        return { ...s, rows: [...currentRows, newRow] };
       }
-      return [...prev, newRow];
-    });
+      return s;
+    }));
     if (newRow.children.length > 0) setSelectedId(newRow.children[0].id);
     else setSelectedId(newRow.id);
-  }, []);
+  }, [currentScreenId]);
 
   // ── Mover componente existente ────────────────────────────────────────────
   const moveComponent = useCallback((item, toRowId, toIndex, newRowAfter = null) => {
@@ -410,7 +514,8 @@ function App() {
       }
       return { ...row, children: updateCompRecursive(row.children, id, newProps) };
     }));
-  }, []);
+    triggerSave();
+  }, [triggerSave]);
 
   // ── Eliminar componente ───────────────────────────────────────────────────
   const deleteComponent = useCallback((id) => {
@@ -483,45 +588,52 @@ function App() {
     return () => window.removeEventListener('keydown', handleShortcuts);
   }, [selectedId, deleteComponent, duplicateComponent]);
 
-  // ── Persistencia ──────────────────────────────────────────────────────────
-  const triggerSave = useCallback(() => {
-    setSaveStatus('Saving...');
-    requestAnimationFrame(() => {
-      const projectData = { name: currentProject.name, theme, viewMode, rows, activeWindow, database, modified: new Date().toISOString() };
-      localStorage.setItem(`nanostudio_project_${currentProject.id}`, JSON.stringify(projectData));
-      localStorage.setItem('nanostudio_current_project', JSON.stringify(currentProject));
-      setSaveStatus('Saved');
-      setTimeout(() => setSaveStatus(''), 800);
-    });
-  }, [rows, database, currentProject, theme, viewMode, activeWindow]);
+
 
   useEffect(() => { localStorage.setItem('nanostudio_theme', theme); }, [theme]);
+  useEffect(() => { 
+    localStorage.setItem('nanostudio_builder_name', builderName); 
+    document.title = builderName;
+  }, [builderName]);
 
   useEffect(() => {
+    isInitialLoading.current = true;
     const saved = localStorage.getItem(`nanostudio_project_${currentProject.id}`);
     if (saved) {
       try {
         const data = JSON.parse(saved);
-        // Migración: si el proyecto guardado usa formato viejo (components[]), convertir
-        if (data.components && !data.rows) {
-          const migrated = data.components.map(comp => ({
-            id: mkId(), layout: { ...DEFAULT_LAYOUT },
-            children: [comp]
-          }));
-          setRows(normalizeRows(migrated));
+        // Migration: If it's the old format (rows only)
+        if (data.rows && !data.screens) {
+          const migratedScreens = [{ id: 'screen-1', name: 'Screen 1', rows: normalizeRows(data.rows), settings: { timeout: 0, nextScreenId: null } }];
+          setScreens(migratedScreens);
+          setCurrentScreenId('screen-1');
+        } else if (data.screens && data.screens.length > 0) {
+          setScreens(data.screens);
+          setCurrentScreenId(data.currentScreenId || data.screens[0].id);
         } else {
-          setRows(normalizeRows(data.rows || []));
+          setScreens([{ id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }]);
+          setCurrentScreenId('screen-1');
         }
+        
         setTheme(data.theme || 'theme-nano');
         setViewMode(data.viewMode || 'desktop');
         setActiveWindow(data.activeWindow || null);
         setDatabase(data.database || { tables: [], data: {} });
-      } catch(e) { console.error(e); setRows([]); }
-    } else { setRows([]); }
+      } catch(e) { 
+        console.error("Load error:", e); 
+        setScreens([{ id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }]);
+        setCurrentScreenId('screen-1');
+      }
+    } else { 
+      setScreens([{ id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }]);
+      setCurrentScreenId('screen-1');
+    }
     setSaveStatus('');
+    // Allow saving after a short delay to ensure React has finished updating state
+    setTimeout(() => { isInitialLoading.current = false; }, 500);
   }, [currentProject.id]);
 
-  useEffect(() => { if (rows.length > 0 || currentProject.id !== 'default') triggerSave(); }, [rows, triggerSave]);
+  useEffect(() => { if (screens.length > 0 || currentProject.id !== 'default') triggerSave(); }, [screens, currentScreenId, triggerSave]);
 
   // ── Stats ─────────────────────────────────────────────────────────────────
   const countAll = (rowsArr) => rowsArr.reduce((acc, row) => acc + countComps(row.children), 0);
@@ -609,13 +721,19 @@ function App() {
           paddingBottom: `${(parseInt(p.layout?.paddingBottom) || 0) + 12}px`,
           paddingLeft: `${(parseInt(p.layout?.paddingLeft) || 0) + 12}px`,
         };
+        
+        let closeBtnHtml = '';
+        if (p.showClose && p.closeNextScreenId) {
+          closeBtnHtml = `<button class="retro-window-close" style="background:none; border:none; color:inherit; cursor:pointer; font-size:12px; font-weight:bold; padding:0 4px; font-family:monospace;" onclick="goToScreen('${p.closeNextScreenId}')">[X]</button>`;
+        }
+
         const html = `<div class="retro-window" style="${styleObjToString({
           width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '100%'),
           minHeight: isHeightFill ? '100%' : (p.height ? `${p.height}px` : ''),
           height: isHeightFill ? '100%' : 'auto',
           background: getThemeColor(p.bgColor, '--bg'),
           borderColor: getThemeColor(p.borderColor, '--border'),
-        })}"><div class="retro-window-titlebar"><span class="retro-window-title" style="color:${getThemeColor(p.textColor, '--accent')}">${escapeHtml(p.title)}</span></div><div class="retro-window-content" style="${styleObjToString(paddedStyles)}">${renderChildren()}</div></div>`;
+        })}"><div class="retro-window-titlebar"><span class="retro-window-title" style="color:${getThemeColor(p.textColor, '--accent')}">${escapeHtml(p.title)}</span>${closeBtnHtml}</div><div class="retro-window-content" style="${styleObjToString(paddedStyles)}">${renderChildren()}</div></div>`;
         return wrapComponent(html);
       }
       case 'Frame': {
@@ -628,7 +746,7 @@ function App() {
           background: p.bgColor || 'transparent',
           minHeight: isHeightFill ? '100%' : (p.height ? `${p.height}px` : 'auto'),
           height: isHeightFill ? '100%' : 'auto',
-        })}"><legend style="color:${getThemeColor(p.textColor, '--accent')}">${escapeHtml(p.title)}</legend><div class="retro-frame-content" style="${styleObjToString(layoutToStyles(p.layout))}">${renderChildren()}</div></fieldset></div>`;
+        })}"><legend style="color:${getThemeColor(p.textColor, '--accent')};font-size:${p.fontSize||12}px;text-align:${p.alignment||'left'};">${escapeHtml(p.title)}</legend><div class="retro-frame-content" style="${styleObjToString(layoutToStyles(p.layout))}">${renderChildren()}</div></fieldset></div>`;
         return wrapComponent(html);
       }
       case 'Row': {
@@ -640,24 +758,62 @@ function App() {
         })}">${renderChildren()}</div>`;
         return wrapComponent(html);
       }
-      case 'Button':
-        return wrapComponent(`<button class="retro-button" style="${styleObjToString({
+      case 'Button': {
+        const btnStyle = styleObjToString({
           width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : 'auto'),
-          height: isHeightFill ? '100%' : 'auto',
-          '--button-bg': p.bgColor || 'transparent',
-          '--button-text': getThemeColor(p.textColor, '--text'),
-          '--button-border': getThemeColor(p.borderColor, '--text'),
-        })}" ${p.disabled ? 'disabled' : ''}>${escapeHtml(p.text)}</button>`);
+          background: getThemeColor(p.bgColor, '--bg'),
+          color: getThemeColor(p.textColor, '--text'),
+          borderColor: getThemeColor(p.borderColor, '--text'),
+          cursor: p.disabled ? 'not-allowed' : 'pointer',
+          opacity: p.disabled ? 0.6 : 1,
+        });
+        
+        let onClickAttr = '';
+        if (p.action === 'screen' && p.targetScreenId) {
+          onClickAttr = `onclick="goToScreen('${p.targetScreenId}')"`;
+        } else if (p.action === 'navigate' && p.targetWindow) {
+          onClickAttr = `onclick="document.getElementById('${p.targetWindow}')?.scrollIntoView({behavior:'smooth'})"`;
+        } else if (p.action === 'external' && p.href) {
+          onClickAttr = `onclick="window.open('${escapeHtml(p.href)}','_blank')"`;
+        } else if (p.action === 'email' && p.mailto) {
+          onClickAttr = `onclick="location.href='mailto:${escapeHtml(p.mailto)}'"`
+        }
+
+        return wrapComponent(`<button class="retro-button" style="${btnStyle}" ${onClickAttr} ${p.disabled ? 'disabled' : ''}>${escapeHtml(p.text)}</button>`);
+      }
+      case 'Text':
       case 'Label': {
         const textAlign = p.alignment || 'left';
-        const content = p.linkUrl
-          ? `<a href="${escapeHtml(p.linkUrl)}" target="_blank" rel="noopener noreferrer" style="color:${getThemeColor(p.textColor, '--text')};text-decoration:underline;">${escapeHtml(p.text)}</a>`
-          : `<span style="color:${getThemeColor(p.textColor, '--text')};">${escapeHtml(p.text)}</span>`;
-        return wrapComponent(`<label class="retro-label" style="${styleObjToString({
+        
+        // Helper to convert [tag] to <tag> for export (multiline support)
+        const formatForExport = (txt) => {
+          if (!txt) return '';
+          return escapeHtml(txt)
+            .replace(/\[b\]([\s\S]*?)\[\/b\]/g, '<strong>$1</strong>')
+            .replace(/\[i\]([\s\S]*?)\[\/i\]/g, '<em>$1</em>')
+            .replace(/\[u\]([\s\S]*?)\[\/u\]/g, '<u style="text-decoration:underline;">$1</u>')
+            .replace(/\[s\]([\s\S]*?)\[\/s\]/g, '<s style="text-decoration:line-through;">$1</s>')
+            .replace(/\[sup\]([\s\S]*?)\[\/sup\]/g, '<sup>$1</sup>')
+            .replace(/\[sub\]([\s\S]*?)\[\/sub\]/g, '<sub>$1</sub>');
+        };
+
+        const style = styleObjToString({
           fontSize: p.fontSize || 12,
           textAlign,
           justifyContent: textAlign === 'center' ? 'center' : textAlign === 'right' ? 'flex-end' : 'flex-start',
-        })}">${content}</label>`);
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          color: getThemeColor(p.textColor, '--text'),
+          display: 'inline-block',
+          width: isWidthFill ? '100%' : 'auto'
+        });
+
+        const innerContent = formatForExport(p.text);
+        const html = p.linkUrl 
+          ? `<a href="${escapeHtml(p.linkUrl)}" target="_blank" style="text-decoration:none; display:inline-block; width:${isWidthFill?'100%':'auto'};">${wrapComponent(`<span style="${style}">${innerContent}</span>`)}</a>`
+          : wrapComponent(`<span style="${style}">${innerContent}</span>`);
+          
+        return html;
       }
       case 'Input':
       case 'TextBox':
@@ -728,43 +884,52 @@ function App() {
           borderRadius: p.shapeType === 'circle' ? '50%' : '0',
           display: 'inline-block',
         })}"></div>`);
-      case 'Line':
+      case 'Line': {
+        const borderValue = 
+          p.lineStyle === 'double' ? `${p.thickness || 1}px double` :
+          p.lineStyle === 'dashed' ? `${p.thickness || 1}px dashed` :
+          `${p.thickness || 1}px solid`;
         return wrapComponent(`<div style="${styleObjToString({
-          width: p.fullWidth ? `${p.widthPercent || 100}%` : '100px',
-          height: `${p.thickness || 1}px`,
-          background: getThemeColor(p.color, '--text'),
-          margin: '4px 0'
+          width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '100%'),
+          borderTop: `${borderValue} ${getThemeColor(p.color, '--text')}`,
+          margin: '8px 0',
+          height: 0,
+          flexShrink: 0
         })}"></div>`);
-      case 'Image':
-        if (p.src) {
-          return wrapComponent(`<img src="${escapeHtml(p.src)}" alt="${escapeHtml(p.alt)}" style="${styleObjToString({
-            width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '80px'),
-            height: isHeightFill ? '100%' : (p.height ? `${p.height}px` : '80px'),
-            border: `1px solid var(--border)`
-          })}" />`);
-        }
-        if (p.iconSrc) {
-          return wrapComponent(`<div class="image-icon-render" style="${styleObjToString({
-            width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '80px'),
-            height: isHeightFill ? '100%' : (p.height ? `${p.height}px` : '80px'),
-            border: `1px solid var(--border)`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'var(--bg)',
-            color: getThemeColor(p.iconColor, '--text'),
-            padding: '4px',
-          })}">${p.iconSrc}</div>`);
-        }
-        return wrapComponent(`<div style="${styleObjToString({
+      }
+      case 'Image': {
+        const bThick = p.borderThickness !== undefined ? p.borderThickness : 1;
+        const bStyle = bThick > 0 ? `${bThick}px solid ${getThemeColor(p.borderColor, '--border')}` : 'none';
+        const isSvg = p.src && (p.src.toLowerCase().endsWith('.svg') || p.src.startsWith('data:image/svg+xml'));
+        const finalIconColor = getThemeColor(p.iconColor, '--accent');
+
+        const containerStyle = {
           width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '80px'),
           height: isHeightFill ? '100%' : (p.height ? `${p.height}px` : '80px'),
-          border: `1px solid var(--border)`,
+          border: bStyle,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: 'var(--bg)',
-        })}"><span style="font-size:10px;color:var(--text-dim);">[IMG ${p.width || 80}x${p.height || 80}]</span></div>`);
+          overflow: 'hidden',
+          background: 'transparent'
+        };
+
+        if (isSvg && p.iconColor) {
+          return wrapComponent(`<div style="${styleObjToString(containerStyle)}"><div style="width:100%;height:100%;background-color:${finalIconColor};mask-image:url('${p.src}');mask-repeat:no-repeat;mask-position:center;mask-size:contain;-webkit-mask-image:url('${p.src}');-webkit-mask-repeat:no-repeat;-webkit-mask-position:center;-webkit-mask-size:contain;"></div></div>`);
+        }
+
+        if (p.src) {
+          return wrapComponent(`<div style="${styleObjToString(containerStyle)}"><img src="${escapeHtml(p.src)}" alt="${escapeHtml(p.alt || '')}" style="width:100%;height:100%;object-fit:contain;"></div>`);
+        }
+        if (p.iconSrc) {
+          return wrapComponent(`<div class="image-icon-render" style="${styleObjToString({
+            ...containerStyle,
+            color: finalIconColor,
+            padding: '10%'
+          })}">${p.iconSrc}</div>`);
+        }
+        return wrapComponent(`<div style="${styleObjToString(containerStyle)}"><span style="font-size:10px;color:var(--text-dim);">[IMG ${p.width || 80}x${p.height || 80}]</span></div>`);
+      }
       case 'Data':
         return wrapComponent(`<div class="retro-data" style="font-size:11px;color:var(--text-dim);padding:4px 8px;border:1px dashed var(--border);">[DATA] Table: ${escapeHtml(p.tableName || 'none')} | Source: ${escapeHtml(p.dataSource || 'sqlite')}${p.query ? `<div style="font-size:9px;margin-top:2px;">${p.dataSource === 'sqlite' ? 'Query' : p.dataSource === 'json' ? 'JSON Path' : 'API URL'}: ${escapeHtml(p.query)}</div>` : ''}</div>`);
       case 'Table': {
@@ -790,11 +955,36 @@ function App() {
 
   const exportHTML = () => {
     const t = THEMES[theme];
-    const rowsHtml = rows.map(row => `<div class="layout-row" style="${styleObjToString({
-      ...layoutToStyles(row.layout),
-      width: '100%',
-      margin: '12px 0',
-    })}">${(row.children || []).map(renderComponentExport).join('')}</div>`).join('');
+    
+    const screensHtml = screens.map((screen, sIdx) => {
+      const isSingleWindow = screen.rows.length === 1 && screen.rows[0].children.length === 1 && screen.rows[0].children[0].type === 'Window';
+      
+      const rowsHtml = screen.rows.map(row => `<div class="layout-row" style="${styleObjToString({
+        ...layoutToStyles(row.layout),
+        width: '100%',
+        margin: isSingleWindow ? '0' : '12px 0',
+      })}">${(row.children || []).map(renderComponentExport).join('')}</div>`).join('');
+
+      const previewStyles = styleObjToString({
+        padding: `${canvasPadding.top}px ${canvasPadding.right}px ${canvasPadding.bottom}px ${canvasPadding.left}px`,
+        display: isSingleWindow ? 'flex' : 'block',
+        flexDirection: isSingleWindow ? 'column' : undefined,
+        alignItems: isSingleWindow ? 'center' : undefined,
+        justifyContent: isSingleWindow ? 'center' : undefined,
+        minHeight: isSingleWindow ? '100vh' : undefined,
+      });
+
+      return `
+        <div id="${screen.id}" class="screen-container" style="display: ${sIdx === 0 ? 'block' : 'none'};" 
+             data-timeout="${screen.settings?.timeout || 0}" 
+             data-next="${screen.settings?.nextScreenId || ''}">
+          <div class="canvas ${viewMode === 'mobile' ? 'mobile' : ''}">
+            <div class="preview-area ${isSingleWindow ? 'centered' : ''}" style="${previewStyles}">
+              ${rowsHtml}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
 
     const dotColor = (t.accent || '#00aa00').replace('#', '%23');
     const css = `${appCss}
@@ -809,6 +999,7 @@ body {
   background-size: 8px 8px;
   background-repeat: repeat;
 }
+.screen-container { width: 100%; min-height: 100vh; }
 .canvas { 
   width: 100%; 
   margin: 0; 
@@ -853,11 +1044,51 @@ ${css}
 </style>
 </head>
 <body class="${theme}">
-<div class="canvas ${viewMode} ${theme}">
-<div class="preview-area">
-${rowsHtml}
-</div>
-</div>
+  ${screensHtml}
+
+  <script>
+    let timer = null;
+
+    function goToScreen(screenId) {
+      if (timer) clearTimeout(timer);
+      
+      // Hide all screens
+      document.querySelectorAll('.screen-container').forEach(s => {
+        s.style.display = 'none';
+      });
+      
+      // Show target screen
+      const target = document.getElementById(screenId);
+      if (target) {
+        target.style.display = 'block';
+        window.scrollTo(0, 0);
+        
+        // Handle auto-jump timer
+        const timeout = parseFloat(target.getAttribute('data-timeout') || '0');
+        const nextId = target.getAttribute('data-next');
+        
+        if (timeout > 0 && nextId) {
+          timer = setTimeout(() => {
+            goToScreen(nextId);
+          }, timeout * 1000);
+        }
+      }
+    }
+
+    // Initialize first screen timer
+    window.onload = () => {
+      const firstScreen = document.querySelector('.screen-container');
+      if (firstScreen) {
+        const timeout = parseFloat(firstScreen.getAttribute('data-timeout') || '0');
+        const nextId = firstScreen.getAttribute('data-next');
+        if (timeout > 0 && nextId) {
+          timer = setTimeout(() => {
+            goToScreen(nextId);
+          }, timeout * 1000);
+        }
+      }
+    };
+  </script>
 </body>
 </html>`;
 
@@ -870,7 +1101,11 @@ ${rowsHtml}
     if (!name) return;
     const id = mkId();
     setCurrentProject({ id, name });
-    setRows([]); setSelectedId(null); setActiveWindow(null);
+    const initialScreens = [{ id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }];
+    setScreens(initialScreens);
+    setCurrentScreenId('screen-1');
+    setSelectedId(null);
+    setActiveWindow(null);
     setDatabase({ tables: [], data: {} });
     setShowProjects(false);
   };
@@ -882,13 +1117,27 @@ ${rowsHtml}
 
   const loadProject = (id) => {
     const proj = getProjectList().find(p => p.id === id);
-    if (proj) { setCurrentProject({ id, name: proj.name }); setShowProjects(false); }
+    if (proj) {
+      setCurrentProject({ id, name: proj.name });
+      const saved = localStorage.getItem(`nanostudio_project_${id}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setScreens([{ id: 'screen-1', name: 'Screen 1', rows: parsed, settings: { timeout: 0, nextScreenId: null } }]);
+          setCurrentScreenId('screen-1');
+        } else if (parsed.screens) {
+          setScreens(parsed.screens);
+          setCurrentScreenId(parsed.currentScreenId || parsed.screens[0].id);
+        }
+      }
+      setShowProjects(false);
+    }
   };
 
   const deleteProject = (id) => {
     if (!confirm('Delete project?')) return;
     localStorage.removeItem(`nanostudio_project_${id}`);
-    if (currentProject.id === id) { setCurrentProject({ id: 'default', name: 'Untitled' }); setRows([]); }
+    if (currentProject.id === id) { setCurrentProject({ id: 'default', name: 'Untitled' }); setScreens([]); setCurrentScreenId(null); }
   };
 
   const renameProject = (id, name) => {
@@ -898,7 +1147,7 @@ ${rowsHtml}
   };
 
   const selectedElement = findSelected();
-  const isRowSelected = selectedElement && rows.some(r => r.id === selectedId);
+  const isRowSelected = selectedElement && (activeScreen?.rows || []).some(r => r.id === selectedId);
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -915,33 +1164,111 @@ ${rowsHtml}
           <button className="toolbar-btn" onClick={() => setShowDatabase(!showDatabase)}>Database</button>
           <button className="toolbar-btn" onClick={() => setShowProjects(!showProjects)}>Projects</button>
           <button className="toolbar-btn" onClick={() => selectedId && duplicateComponent(selectedId)} disabled={!selectedId}>Duplicate</button>
+          <button className="toolbar-btn" onClick={() => setShowSettings(true)} title="Settings" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ 
+              width: 16, 
+              height: 16, 
+              backgroundColor: 'currentColor', 
+              maskImage: 'url(/src/img/icons/imgi_17_gear.svg)',
+              WebkitMaskImage: 'url(/src/img/icons/imgi_17_gear.svg)',
+              maskSize: 'contain',
+              WebkitMaskSize: 'contain',
+              maskRepeat: 'no-repeat',
+              WebkitMaskRepeat: 'no-repeat'
+            }} />
+          </button>
         </div>
 
-        <div className="main-layout">
+        <div className="main-layout" style={{ position: 'relative' }}>
           <Toolbox />
-          <Canvas
-            rows={rows}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onDelete={deleteComponent}
-            onDuplicate={duplicateComponent}
-            viewMode={viewMode}
-            onAddToRow={addToRow}
-            onAddNewRow={addNewRow}
-            onMoveComponent={moveComponent}
-            onSelectRow={selectRow}
-            activeWindow={activeWindow}
-            canvasPadding={canvasPadding}
-            database={database}
-          />
-          <Inspector
-            component={selectedElement}
-            isRow={isRowSelected}
-            onUpdate={updateComponent}
+          <div className="canvas-container" style={{ position: 'relative', overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <Canvas
+              rows={rows}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onDelete={deleteComponent}
+              onDuplicate={duplicateComponent}
+              viewMode={viewMode}
+              onAddToRow={addToRow}
+              onAddNewRow={addNewRow}
+              onMoveComponent={moveComponent}
+              onSelectRow={selectRow}
+              activeWindow={activeWindow}
+              canvasPadding={canvasPadding}
+              database={database}
+            />
+
+            {showUserJourney && (
+              <UserJourneyPanel 
+                screens={screens} 
+                currentScreenId={currentScreenId} 
+                onSelect={setCurrentScreenId} 
+                onAdd={addScreen} 
+                onDelete={deleteScreen}
+                onMove={moveScreen}
+                onClose={() => setShowUserJourney(false)}
+              />
+            )}
+
+        {/* Global Toolbar Buttons (Floating) */}
+        {!showUserJourney && (
+          <button 
+            className="toolbar-btn user-journey-toggle"
+            onClick={() => setShowUserJourney(true)}
+            title="User Journey"
+            style={{ 
+              zIndex: 100, 
+              width: 40, 
+              height: 40,
+              padding: '4px',
+              borderRadius: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'transparent',
+              border: '1px solid var(--accent)',
+              color: 'var(--accent)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              outline: 'none',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+            }}
+            onMouseOver={e => {
+              e.currentTarget.style.backgroundColor = 'var(--accent)';
+              e.currentTarget.style.color = 'var(--bg)';
+            }}
+            onMouseOut={e => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--accent)';
+            }}
+          >
+            <div style={{ 
+              width: 32, 
+              height: 32, 
+              backgroundColor: 'currentColor', 
+              maskImage: 'url(/src/img/icons/imgi_47_monitor-medical.svg)',
+              WebkitMaskImage: 'url(/src/img/icons/imgi_47_monitor-medical.svg)',
+              maskSize: 'contain',
+              WebkitMaskSize: 'contain',
+              maskRepeat: 'no-repeat',
+              WebkitMaskRepeat: 'no-repeat'
+            }} />
+          </button>
+        )}
+
+
+          </div>
+          <Inspector 
+            component={selectedElement} 
+            onUpdate={updateComponent} 
             onDelete={() => selectedId && deleteComponent(selectedId)}
             onDuplicate={() => selectedId && duplicateComponent(selectedId)}
-            windows={getWindows()}
+            isRow={isRowSelected}
             database={database}
+            screens={screens}
+            activeScreen={activeScreen}
+            onUpdateScreen={updateScreen}
+            windows={getWindows()}
             canvasPadding={canvasPadding}
             onCanvasPaddingChange={setCanvasPadding}
             selectedId={selectedId}
@@ -950,7 +1277,10 @@ ${rowsHtml}
         </div>
 
         <div className="status-bar">
-          <span>{currentProject.name}</span>
+          <div style={{ display: 'flex', gap: 16 }}>
+            <span>Project: {currentProject.name}</span>
+            <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>Screen: {screens.find(s => s.id === currentScreenId)?.name || 'Default'}</span>
+          </div>
           <span>{countAll(rows)} components · {rows.length} rows</span>
           <span>{viewMode === 'desktop' ? 'Desktop' : 'Mobile'}</span>
           <span>Theme: {THEMES[theme]?.name}</span>
@@ -988,11 +1318,179 @@ ${rowsHtml}
           </div>
         )}
 
+        {showSettings && (
+          <div className="projects-overlay" onClick={() => setShowSettings(false)}>
+            <div className="projects-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+              <div className="modal-titlebar">
+                <span className="modal-title">[ Settings ]</span>
+                <button className="modal-close" onClick={() => setShowSettings(false)}>X</button>
+              </div>
+              <div className="modal-body">
+                <div className="property-group">
+                  <label>BUILDER NAME</label>
+                  <input 
+                    type="text" 
+                    value={builderName} 
+                    onChange={e => setBuilderName(e.target.value)} 
+                    style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '8px', width: '100%', fontFamily: 'monospace' }}
+                  />
+                </div>
+                <div style={{ marginTop: 24, textAlign: 'center' }}>
+                  <button className="modal-action-btn" onClick={() => setShowSettings(false)}>Close</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showDatabase && (
           <DatabasePanel database={database} setDatabase={setDatabase} onClose={() => setShowDatabase(false)} triggerSave={triggerSave} />
         )}
       </div>
+      {/* Confirm Modal */}
+      {confirmModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.8)', zIndex: 10000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 20
+        }}>
+          <div style={{
+            background: 'var(--panel-bg)',
+            border: '2px solid var(--accent)',
+            width: '100%', maxWidth: 400,
+            boxShadow: '0 0 30px rgba(255,255,0,0.2)',
+            padding: 0
+          }}>
+            <div style={{
+              background: 'var(--accent)', color: 'var(--bg)',
+              padding: '6px 12px', fontWeight: 'bold', fontSize: 12,
+              display: 'flex', justifyContent: 'space-between'
+            }}>
+              <span>[ {confirmModal.title} ]</span>
+              <button onClick={() => setConfirmModal(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>X</button>
+            </div>
+            <div style={{ padding: 24, color: 'var(--text)', fontSize: 13, lineHeight: 1.5 }}>
+              {confirmModal.message}
+            </div>
+            <div style={{ 
+              padding: 12, borderTop: '1px solid var(--border)', 
+              display: 'flex', justifyContent: 'flex-end', gap: 12 
+            }}>
+              <button 
+                className="toolbar-btn" 
+                onClick={() => setConfirmModal(null)}
+                style={{ padding: '6px 16px' }}
+              >
+                Cancelar
+              </button>
+              <button 
+                className="toolbar-btn" 
+                onClick={confirmModal.onConfirm}
+                style={{ 
+                  padding: '6px 16px', 
+                  background: 'var(--accent)', 
+                  color: 'var(--bg)',
+                  borderColor: 'var(--accent)'
+                }}
+              >
+                {confirmModal.confirmText || 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </DndProvider>
+  );
+}
+
+// ─── Componentes Auxiliares para User Journey ──────────────────────────────
+
+// ─── Componentes Auxiliares para User Journey ──────────────────────────────
+
+import { useDrag, useDrop } from 'react-dnd';
+
+function DraggableScreenCard({ screen, index, currentScreenId, onSelect, onDelete, onMove }) {
+  const ref = React.useRef(null);
+  
+  const [{ isDragging }, drag] = useDrag({
+    type: 'SCREEN_CARD',
+    item: { index },
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging(),
+    }),
+  });
+
+  const [, drop] = useDrop({
+    accept: 'SCREEN_CARD',
+    hover(item, monitor) {
+      if (!ref.current) return;
+      const dragIndex = item.index;
+      const hoverIndex = index;
+      if (dragIndex === hoverIndex) return;
+      onMove(dragIndex, hoverIndex);
+      item.index = hoverIndex;
+    },
+  });
+
+  drag(drop(ref));
+
+  return (
+    <div 
+      ref={ref}
+      className={`uj-screen-card ${currentScreenId === screen.id ? 'active' : ''}`}
+      style={{ opacity: isDragging ? 0.3 : 1 }}
+      onClick={() => onSelect(screen.id)}
+    >
+      <div className="uj-screen-thumb">
+        {screen.rows.length > 0 ? (
+          <div style={{ fontSize: 9, opacity: 0.5 }}>[ Screen {index + 1} ]</div>
+        ) : (
+          <div style={{ fontSize: 9, opacity: 0.3 }}>[ Empty ]</div>
+        )}
+      </div>
+      <div className="uj-screen-info">
+        <span className="uj-screen-name">{screen.name}</span>
+        {index > 0 && (
+          <button 
+            className="uj-screen-delete" 
+            onClick={(e) => { e.stopPropagation(); onDelete(screen.id); }}
+          >
+            delete
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UserJourneyPanel({ screens, currentScreenId, onSelect, onAdd, onDelete, onMove, onClose }) {
+  return (
+    <div className="user-journey-panel">
+      <div className="uj-header">
+        <span>[ USER JOURNEY ]</span>
+        <button className="uj-close" onClick={onClose}>X</button>
+      </div>
+      <div className="uj-content">
+        <div className="uj-screens-list">
+          {screens.map((screen, idx) => (
+            <DraggableScreenCard 
+              key={screen.id}
+              screen={screen}
+              index={idx}
+              currentScreenId={currentScreenId}
+              onSelect={onSelect}
+              onDelete={onDelete}
+              onMove={onMove}
+            />
+          ))}
+          <button className="uj-add-screen" onClick={onAdd}>
+            <div style={{ fontSize: 24, marginBottom: 4 }}>+</div>
+            <span>Add Screen</span>
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

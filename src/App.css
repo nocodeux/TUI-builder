@@ -11,6 +11,27 @@ body {
   font-size: 14px;
 }
 
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
+::-webkit-scrollbar-corner {
+  background: var(--bg);
+}
+
+/* Custom Resizer (Corner handle for textareas) */
+::-webkit-resizer {
+  background: var(--bg);
+  background-image: linear-gradient(135deg, transparent 50%, var(--border) 50%, var(--border) 60%, transparent 60%, transparent 70%, var(--border) 70%);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    TEMAS
    ═══════════════════════════════════════════════════════════════ */
@@ -197,6 +218,11 @@ body {
   position: relative;
 }
 
+.preview-area.centered {
+  justify-content: center;
+  align-items: center;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    ROW SYSTEM — AutoLayout estilo Figma
    ═══════════════════════════════════════════════════════════════ */
@@ -238,13 +264,11 @@ body {
 .drop-indicator-line {
   background: var(--accent);
   border-radius: 2px;
-  flex-shrink: 0;
   pointer-events: none;
   opacity: 0.9;
-  box-shadow: 0 0 8px var(--accent);
+  box-shadow: 0 0 10px var(--accent);
   animation: indicator-pulse 0.8s ease-in-out infinite alternate;
-  z-index: 20;
-  margin: 16px 0; /* Increased spacing */
+  z-index: 100;
 }
 
 @keyframes indicator-pulse {
@@ -399,6 +423,22 @@ body {
 .hex-input {
   width: 80px !important;
   font-family: monospace !important;
+}
+
+.text-tools button {
+  background: var(--selected);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 2px 6px;
+  font-size: 10px;
+  cursor: pointer;
+  font-family: monospace;
+  min-width: 24px;
+}
+
+.text-tools button:hover {
+  background: var(--accent);
+  color: var(--bg);
 }
 
 .color-picker {
@@ -626,6 +666,8 @@ body {
   align-items: center;
   min-height: 24px;
   max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .retro-checkbox,
@@ -852,6 +894,159 @@ body {
   color: var(--bg);
 }
 
+/* User Journey Panel */
+.user-journey-toggle {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.user-journey-toggle:hover {
+  background: var(--text);
+  color: var(--bg);
+}
+
+.user-journey-panel {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: auto; /* Changed from 180px to auto */
+  max-height: 150px; /* Added max-height */
+  background: var(--panel-bg);
+  border-top: 2px solid var(--border);
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -5px 20px rgba(0,0,0,0.5);
+  overflow-y: auto; /* Added overflow-y */
+}
+
+.uj-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--selected);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.1em;
+}
+
+.uj-close {
+  background: #330000;
+  border: 1px solid #ff0000;
+  color: #ff6666;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: monospace;
+}
+
+.uj-close:hover {
+  background: #ff0000;
+  color: #000;
+}
+
+.uj-content {
+  /* Removed flex: 1 to allow height to shrink to content */
+  overflow-x: auto;
+  padding: 5px;
+  flex-shrink: 0; /* Ensure it doesn't try to grow */
+}
+
+.uj-screens-list {
+  display: flex;
+  gap: 15px;
+  align-items: flex-start;
+}
+
+.uj-screen-card {
+  width: 120px;
+  flex-shrink: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.uj-screen-thumb {
+  width: 120px;
+  height: 70px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: all 0.2s;
+}
+
+.uj-screen-card.active .uj-screen-thumb {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.uj-screen-card:hover .uj-screen-thumb {
+  border-color: var(--text);
+}
+
+.uj-screen-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.uj-screen-name {
+  font-size: 10px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 70px;
+}
+
+.uj-screen-delete {
+  background: transparent;
+  border: none;
+  color: #ff6666;
+  font-size: 9px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.uj-screen-delete:hover {
+  color: #ff0000;
+}
+
+.uj-add-screen {
+  width: 120px;
+  height: 70px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.uj-add-screen:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(255, 255, 0, 0.02);
+}
+
 .project-item {
   padding: 10px;
   border-bottom: 1px solid var(--border);
@@ -1051,4 +1246,139 @@ input[type="number"]::-webkit-inner-spin-button {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-dim);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   USER JOURNEY PANEL
+   ═══════════════════════════════════════════════════════════════ */
+
+.user-journey-panel {
+  background: var(--panel-bg);
+  border-top: 1px solid var(--border);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  max-height: 180px;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+  flex-shrink: 0;
+}
+
+.uj-header {
+  padding: 6px 12px;
+  background: var(--selected);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+}
+
+.uj-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: monospace;
+}
+
+.uj-close:hover {
+  color: var(--accent);
+}
+
+.uj-content {
+  padding: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: rgba(0,0,0,0.2);
+}
+
+.uj-screens-list {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.uj-screen-card {
+  width: 140px;
+  flex-shrink: 0;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  transition: all 0.2s;
+  position: relative;
+}
+
+.uj-screen-card:hover {
+  border-color: var(--text);
+}
+
+.uj-screen-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(255,255,0,0.2);
+}
+
+.uj-screen-thumb {
+  height: 70px;
+  width: 100%;
+  background: rgba(0,255,0,0.03);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.uj-screen-info {
+  padding: 6px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.uj-screen-name {
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
+}
+
+.uj-screen-delete {
+  font-size: 8px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--text-dim);
+  padding: 1px 4px;
+  cursor: pointer;
+}
+
+.uj-screen-delete:hover {
+  color: #ff4444;
+  border-color: #ff4444;
+}
+
+.uj-add-screen {
+  width: 140px;
+  height: 105px;
+  flex-shrink: 0;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.uj-add-screen:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(255,255,0,0.02);
+}
+
+.uj-add-screen span {
+  font-size: 9px;
 }

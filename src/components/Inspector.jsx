@@ -142,7 +142,7 @@ function AutoLayoutPanel({ layout = {}, onUpdate }) {
 }
 
 // ─── Inspector principal ──────────────────────────────────────────────────────
-function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows, database, canvasPadding, onCanvasPaddingChange, selectedId, themeColors = {} }) {
+function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows, database, canvasPadding, onCanvasPaddingChange, selectedId, themeColors = {}, activeScreen, screens, onUpdateScreen }) {
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [localProps, setLocalProps] = useState({});
 
@@ -163,13 +163,47 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
     return (
       <div className="inspector">
         <h3>[INSPECTOR]</h3>
-        <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: 20, fontSize: 11 }}>
-          [ No selection ]<br /><br />
-          [ Click a component to edit ]<br />
-          [ Click row border = layout ]
+        <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: 10, fontSize: 11 }}>
+          [ {activeScreen?.name || 'Screen'} selected ]
         </div>
+        
+        <div className="property-divider" style={{ marginTop: 15 }} />
+        
+        <div className="al-section-title">SCREEN SETTINGS</div>
+        <div className="property-group">
+          <label>NAME</label>
+          <input 
+            type="text" 
+            value={activeScreen?.name || ''} 
+            onChange={e => onUpdateScreen(activeScreen.id, { name: e.target.value })}
+          />
+        </div>
+        <div className="property-group">
+          <label>AUTO JUMP (sec)</label>
+          <input 
+            type="number" 
+            min="0" 
+            value={activeScreen?.settings?.timeout || 0}
+            onChange={e => onUpdateScreen(activeScreen.id, { settings: { ...activeScreen.settings, timeout: parseInt(e.target.value, 10) || 0 } })}
+            placeholder="0 = disabled"
+          />
+        </div>
+        {(activeScreen?.settings?.timeout > 0) && (
+          <div className="property-group">
+            <label>NEXT SCREEN</label>
+            <select 
+              value={activeScreen?.settings?.nextScreenId || ''} 
+              onChange={e => onUpdateScreen(activeScreen.id, { settings: { ...activeScreen.settings, nextScreenId: e.target.value } })}
+            >
+              <option value="">-- Select Screen --</option>
+              {(screens || []).filter(s => s.id !== activeScreen.id).map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <div className="property-divider" style={{ marginTop: 20 }} />
-        {/* Canvas padding controls */}
         <div className="al-section-title">CANVAS PADDING</div>
         {canvasPadding && onCanvasPaddingChange && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 6 }}>
@@ -245,42 +279,52 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
   const isTransparentColor = v => v === 'transparent';
   const isTransparentPrefix = v => 'transparent'.startsWith((v || '').toLowerCase());
 
-  const renderColor = (label, field, def = '#00ff00', allowTransparent = false) => (
-    <div className="property-group">
-      <label>{label}</label>
-      <div style={{ display: 'flex', gap: 4 }}>
-        <input type="text" className="hex-input" placeholder={def} maxLength={allowTransparent ? 11 : 7}
-          value={localProps[field] ?? ''}
-          onChange={e => {
-            const value = e.target.value;
-            if (value === '' || /^#[0-9a-fA-F]{0,6}$/.test(value) || (allowTransparent && isTransparentPrefix(value))) {
-              updateLocal(field, value);
-            }
-          }}
-          onBlur={() => {
-            const value = localProps[field];
-            if (value === '' || isHex(value) || (allowTransparent && isTransparentColor(value))) {
-              commitChange(field, value);
-            } else {
-              updateLocal(field, component.props[field] ?? '');
-            }
-          }}
-          onKeyDown={e => {
-            const value = localProps[field];
-            if (e.key === 'Enter' && (value === '' || isHex(value) || (allowTransparent && isTransparentColor(value)))) {
-              commitChange(field, value);
-              e.target.blur();
-            }
-          }}
-        />
-        <input type="color"
-          value={normalizePickerColor(localProps[field], normalizePickerColor(component.props[field], def))}
-          onChange={e => updateAndCommit(field, e.target.value)}
-          className="color-picker"
-        />
+  const renderColor = (label, field, defValue = '', allowTransparent = false) => {
+    let themeDefault = defValue;
+    if (!themeDefault) {
+      const fl = field.toLowerCase();
+      if (fl.includes('text') || fl.includes('color') || fl.includes('icon')) themeDefault = themeColors.text || '#00ff00';
+      else if (fl.includes('border')) themeDefault = themeColors.border || '#00ff00';
+      else if (fl.includes('bg')) themeDefault = themeColors.bg || '#000000';
+      else themeDefault = themeColors.text || '#00ff00';
+    }
+
+    return (
+      <div className="property-group">
+        <label>{label}</label>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <input type="text" className="hex-input" placeholder={themeDefault} maxLength={allowTransparent ? 11 : 7}
+            value={localProps[field] ?? ''}
+            onChange={e => {
+              const value = e.target.value;
+              if (value === '' || /^#[0-9a-fA-F]{0,6}$/.test(value) || (allowTransparent && isTransparentPrefix(value))) {
+                updateLocal(field, value);
+              }
+            }}
+            onBlur={() => {
+              const value = localProps[field];
+              if (value === '' || isHex(value) || (allowTransparent && isTransparentColor(value))) {
+                commitChange(field, value);
+              } else {
+                updateLocal(field, component.props[field] ?? '');
+              }
+            }}
+            onKeyDown={e => {
+              const value = localProps[field];
+              if (e.key === 'Enter' && (value === '' || isHex(value) || (allowTransparent && isTransparentColor(value)))) {
+                commitChange(field, value);
+                e.target.blur();
+              }
+            }}
+          />
+          <input type="color" className="color-picker" 
+            value={normalizePickerColor(localProps[field], themeDefault)} 
+            onChange={e => commitChange(field, e.target.value.toLowerCase())} 
+          />
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderProps = () => {
     const t = component.type;
@@ -297,11 +341,32 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         {renderColor('TEXT COLOR','textColor','#00ff00')}
         {renderColor('BACKGROUND','bgColor','#000000', true)}
         {renderColor('BORDER COLOR','borderColor','#00ff00')}
+        
+        <div className="property-divider" />
+        <div className="property-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <label style={{ margin: 0 }}>SHOW CLOSE [X]</label>
+          <input type="checkbox" checked={localProps.showClose||false} onChange={e => updateAndCommit('showClose', e.target.checked)} />
+        </div>
+        {localProps.showClose && (
+          <div className="property-group">
+            <label>CLOSE TARGET SCREEN</label>
+            <select value={localProps.closeNextScreenId||''} onChange={e => updateAndCommit('closeNextScreenId', e.target.value)}>
+              <option value="">-- Select Screen --</option>
+              {(screens||[]).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        )}
       </>);
       case 'Frame': return (<>
         <div className="property-group"><label>TITLE</label><input type="text" value={localProps.title||''} onChange={e => updateAndCommit('title', e.target.value)} /></div>
         {renderNumber('width','WIDTH (px)','300')}
         {renderNumber('height','HEIGHT (px)','auto')}
+        {renderNumber('fontSize','FONT SIZE (px)','12')}
+        <div className="property-group"><label>ALIGNMENT</label>
+          <select value={localProps.alignment||'left'} onChange={e => updateAndCommit('alignment', e.target.value)}>
+            <option value="left">Left</option><option value="center">Center</option><option value="right">Right</option>
+          </select>
+        </div>
         <div className="property-group"><label>BORDER STYLE</label>
           <select value={localProps.borderStyle||'single'} onChange={e => updateAndCommit('borderStyle', e.target.value)}>
             <option value="single">Single</option><option value="double">Double</option><option value="dashed">Dashed</option>
@@ -322,11 +387,20 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         <div className="property-group"><label>ACTION</label>
           <select value={localProps.action||'none'} onChange={e => updateAndCommit('action', e.target.value)}>
             <option value="none">None</option>
+            <option value="screen">Navigate to Screen</option>
             <option value="navigate">Navigate to Window</option>
             <option value="external">Open External Link</option>
             <option value="email">Send Email</option>
           </select>
         </div>
+        {localProps.action === 'screen' && (
+          <div className="property-group"><label>TARGET SCREEN</label>
+            <select value={localProps.targetScreenId||''} onChange={e => updateAndCommit('targetScreenId', e.target.value)}>
+              <option value="">-- Select Screen --</option>
+              {(screens||[]).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        )}
         {localProps.action === 'navigate' && (
           <div className="property-group"><label>TARGET WINDOW</label>
             <select value={localProps.targetWindow||''} onChange={e => updateAndCommit('targetWindow', e.target.value)}>
@@ -342,17 +416,65 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
           <div className="property-group"><label>EMAIL</label><input type="text" value={localProps.mailto||''} onChange={e => updateAndCommit('mailto', e.target.value)} placeholder="user@example.com" /></div>
         )}
       </>);
-      case 'Label': return (<>
-        <div className="property-group"><label>TEXT</label><textarea value={localProps.text||''} onChange={e => updateAndCommit('text', e.target.value)} rows={3} /></div>
-        {renderNumber('fontSize','FONT SIZE (px)','12')}
-        <div className="property-group"><label>ALIGNMENT</label>
-          <select value={localProps.alignment||'left'} onChange={e => updateAndCommit('alignment', e.target.value)}>
-            <option value="left">Left</option><option value="center">Center</option><option value="right">Right</option>
-          </select>
-        </div>
-        {renderColor('TEXT COLOR','textColor','#00ff00')}
-        <div className="property-group"><label>LINK URL</label><input type="text" value={localProps.linkUrl||''} onChange={e => updateAndCommit('linkUrl', e.target.value)} placeholder="https://... (opcional)" /></div>
-      </>);
+      case 'Text':
+      case 'Label': {
+        const wrapSelection = (tag) => {
+          const textarea = document.querySelector('.inspector-textarea');
+          if (!textarea) return;
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const val = localProps.text || '';
+          const before = val.substring(0, start);
+          const selection = val.substring(start, end);
+          const after = val.substring(end);
+          const newVal = `${before}[${tag}]${selection}[/${tag}]${after}`;
+          updateAndCommit('text', newVal);
+          setTimeout(() => {
+            textarea.focus();
+            textarea.setSelectionRange(start + tag.length + 2, end + tag.length + 2);
+          }, 0);
+        };
+
+        const handleKeyDown = (e) => {
+          if (e.ctrlKey || e.metaKey) {
+            if (e.key === 'b') { e.preventDefault(); wrapSelection('b'); }
+            if (e.key === 'i') { e.preventDefault(); wrapSelection('i'); }
+            if (e.key === 'u') { e.preventDefault(); wrapSelection('u'); }
+            if (e.key === 's') { e.preventDefault(); wrapSelection('s'); }
+          }
+        };
+
+        return (<>
+          <div className="property-group">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <label>TEXT</label>
+              <div className="text-tools" style={{ display: 'flex', gap: 2 }}>
+                <button title="Bold (Ctrl+B)" onClick={() => wrapSelection('b')}><b>B</b></button>
+                <button title="Italic (Ctrl+I)" onClick={() => wrapSelection('i')}><i>I</i></button>
+                <button title="Underline (Ctrl+U)" onClick={() => wrapSelection('u')}><u>U</u></button>
+                <button title="Strike (Ctrl+S)" onClick={() => wrapSelection('s')}><s>S</s></button>
+                <button title="Superscript" onClick={() => wrapSelection('sup')}>x²</button>
+                <button title="Subscript" onClick={() => wrapSelection('sub')}>x₂</button>
+              </div>
+            </div>
+            <textarea 
+              className="inspector-textarea"
+              value={localProps.text||''} 
+              onChange={e => updateAndCommit('text', e.target.value)} 
+              onKeyDown={handleKeyDown}
+              rows={4} 
+            />
+          </div>
+          {renderNumber('fontSize','FONT SIZE (px)','12')}
+          <div className="property-group"><label>ALIGNMENT</label>
+            <select value={localProps.alignment||'left'} onChange={e => updateAndCommit('alignment', e.target.value)}>
+              <option value="left">Left</option><option value="center">Center</option><option value="right">Right</option>
+            </select>
+          </div>
+          {renderColor('TEXT COLOR','textColor','#00ff00')}
+          <div className="property-group"><label>LINK URL</label><input type="text" value={localProps.linkUrl||''} onChange={e => updateAndCommit('linkUrl', e.target.value)} placeholder="https://... (opcional)" /></div>
+        </>);
+      }
       case 'Input':
       case 'TextBox': return (<>
         <div className="property-group"><label>PLACEHOLDER</label><input type="text" value={localProps.placeholder||''} onChange={e => updateAndCommit('placeholder', e.target.value)} /></div>
@@ -392,8 +514,14 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         {renderColor('FILL COLOR','bgColor','#000000', true)}
       </>);
       case 'Line': return (<>
-        <div className="property-group"><label>FULL WIDTH</label><input type="checkbox" checked={localProps.fullWidth!==false} onChange={e => updateAndCommit('fullWidth', e.target.checked)} /></div>
         {renderNumber('thickness','THICKNESS (px)','1')}
+        <div className="property-group"><label>LINE STYLE</label>
+          <select value={localProps.lineStyle||'solid'} onChange={e => updateAndCommit('lineStyle', e.target.value)}>
+            <option value="solid">Solid</option>
+            <option value="double">Double</option>
+            <option value="dashed">Dashed</option>
+          </select>
+        </div>
         {renderColor('COLOR','color','#00ff00')}
       </>);
       case 'Image': return (<>
@@ -401,6 +529,8 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         {renderNumber('width','WIDTH (px)','80')}
         {renderNumber('height','HEIGHT (px)','80')}
         <div className="property-group"><label>ALT TEXT</label><input type="text" value={localProps.alt||''} onChange={e => updateAndCommit('alt', e.target.value)} /></div>
+        {renderNumber('borderThickness', 'BORDER', '1')}
+        {renderColor('BORDER COLOR', 'borderColor', '')}
         <div className="property-divider" />
         <div className="al-section-title">ICON LIBRARY</div>
         {localProps.iconSrc && (

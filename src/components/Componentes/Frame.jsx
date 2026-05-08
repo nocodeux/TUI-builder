@@ -17,6 +17,8 @@ function Frame({
   bgColor = '',
   textColor = '',
   borderColor = '',
+  fontSize = 12,
+  alignment = 'left',
   layout = { direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false },
   children,
   onAddChild,
@@ -26,13 +28,19 @@ function Frame({
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ['COMPONENT', 'EXISTING_COMPONENT'],
     drop: (item, monitor) => {
+      console.log(`📍 [DEBUG] Frame drop: id=${id}, type=${item.type}, isNew=${!item.id}`);
       // Si el drop ya fue manejado por un hijo (otro container anidado), ignorar
-      if (monitor.didDrop()) return;
+      if (monitor.didDrop()) {
+        console.log(`   -> Frame Ignored: Already handled by child`);
+        return;
+      }
 
-      if (item.type !== undefined) {
+      if (item.id === undefined) {
         // Viene del Toolbox — agregar como hijo del Frame
+        console.log(`   -> Frame: Adding NEW component ${item.type}`);
         if (onAddChild) onAddChild(item.type);
       } else if (item.id && onMoveChild) {
+        console.log(`   -> Frame: Moving EXISTING component ${item.id}`);
         onMoveChild(item);
       }
       // Si es EXISTING_COMPONENT (reordenar) no hacemos nada aquí —
@@ -65,7 +73,11 @@ function Frame({
           transition: 'outline 0.1s',
         }}
       >
-        <legend style={{ color: textColor || 'var(--accent)' }}>{title}</legend>
+        <legend style={{ 
+          color: textColor || 'var(--accent)',
+          fontSize: fontSize ? `${fontSize}px` : 'inherit',
+          textAlign: alignment
+        }}>{title}</legend>
         <div
           className="retro-frame-content"
           style={{
