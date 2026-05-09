@@ -1,21 +1,59 @@
-import React from 'react';
+import React, { useContext } from 'react';
+import { FormContext } from './Form';
 
-const getThemeColor = (val, themeVar) => {
+function getThemeColor(val, themeVar) {
   if (!val || val.toLowerCase() === '#00ff00' || val.toLowerCase() === '#000000' || val === 'transparent') return `var(${themeVar})`;
   return val;
-};
+}
 
-function ListBox({ items = ['Item 1', 'Item 2', 'Item 3'], width = 150, height = 100, multiSelect = false, textColor = '', borderColor = '', bgColor = '' }) {
+function ListBox({ 
+  items = ['Item 1', 'Item 2', 'Item 3'], 
+  optionTable = '',
+  optionField = '',
+  dataField = '',
+  width = 150, 
+  height = 100, 
+  multiSelect = false, 
+  textColor = '', 
+  borderColor = '', 
+  bgColor = '',
+  database = { data: {} }
+}) {
+  const formContext = useContext(FormContext);
+  
+  // Resolve items from DB if configured
+  let finalItems = items;
+  if (optionTable && optionField && database?.data?.[optionTable]) {
+    finalItems = database.data[optionTable].map(row => row[optionField]).filter(Boolean);
+    // Remove duplicates
+    finalItems = [...new Set(finalItems)];
+  }
+
+  const currentValue = formContext?.formData?.[dataField] || '';
+
+  const handleChange = (e) => {
+    if (formContext && dataField) {
+      formContext.updateField(dataField, e.target.value);
+    }
+  };
+
   return (
-    <select className="retro-listbox" multiple={multiSelect} size="4" style={{ 
-      width: typeof width === 'string' && width.includes('%') ? width : `${width}px`, 
-      height: typeof height === 'string' && height.includes('%') ? height : `${height}px`, 
-      borderColor: getThemeColor(borderColor, '--border'), 
-      color: getThemeColor(textColor, '--text'), 
-      background: getThemeColor(bgColor, '--input-bg') 
-    }}>
-      {items.map((item, idx) => (
-        <option key={idx}>{item}</option>
+    <select 
+      className="retro-listbox" 
+      multiple={multiSelect} 
+      size="4" 
+      value={currentValue}
+      onChange={handleChange}
+      style={{ 
+        width: typeof width === 'string' && width.includes('%') ? width : `${width}px`, 
+        height: typeof height === 'string' && height.includes('%') ? height : `${height}px`, 
+        borderColor: getThemeColor(borderColor, '--border'), 
+        color: getThemeColor(textColor, '--text'), 
+        background: getThemeColor(bgColor, '--input-bg') 
+      }}
+    >
+      {finalItems.map((item, idx) => (
+        <option key={idx} value={item}>{item}</option>
       ))}
     </select>
   );

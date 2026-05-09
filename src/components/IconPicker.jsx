@@ -139,14 +139,18 @@ function IconPicker({ onSelect, onClose, currentIcon }) {
                 }}
               >
                 <div
-                  dangerouslySetInnerHTML={{ __html: icon.svg }}
                   style={{
                     width: 28,
                     height: 28,
-                    color: 'var(--text)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    backgroundColor: 'var(--text)',
+                    maskImage: `url("data:image/svg+xml,${icon.svg.replace(/"/g, "'").replace(/#/g, '%23').replace(/[\n\r]/g, '').replace(/\s+/g, ' ')}")`,
+                    maskRepeat: 'no-repeat',
+                    maskPosition: 'center',
+                    maskSize: 'contain',
+                    WebkitMaskImage: `url("data:image/svg+xml,${icon.svg.replace(/"/g, "'").replace(/#/g, '%23').replace(/[\n\r]/g, '').replace(/\s+/g, ' ')}")`,
+                    WebkitMaskRepeat: 'no-repeat',
+                    WebkitMaskPosition: 'center',
+                    WebkitMaskSize: 'contain',
                   }}
                   className="icon-preview-svg"
                 />

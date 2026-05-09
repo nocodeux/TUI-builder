@@ -1245,3 +1245,98 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 
+
+/* ═══════════════════════════════════════════════════════════════
+   LOADERS
+   ═══════════════════════════════════════════════════════════════ */
+
+.retro-loader-spinner {
+  border-radius: 50%;
+  animation: retro-spin linear infinite;
+}
+
+@keyframes retro-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.retro-loader-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.retro-loader-dots div {
+  border-radius: 50%;
+  animation: retro-dots ease-in-out infinite;
+}
+
+@keyframes retro-dots {
+  0%, 100% { transform: scale(0.3); opacity: 0.3; }
+  50% { transform: scale(1); opacity: 1; }
+}
+
+.retro-loader-bar {
+  position: relative;
+  overflow: hidden;
+}
+
+.retro-loader-bar div {
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  animation: retro-bar linear infinite;
+}
+
+@keyframes retro-bar {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+.retro-loader-bounce {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.retro-loader-bounce div {
+  border-radius: 50%;
+  animation: retro-bounce cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite alternate;
+}
+
+@keyframes retro-bounce {
+  from { transform: translateY(0); }
+  to { transform: translateY(-100%); }
+}
+.db-input {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 8px;
+  font-family: monospace;
+  font-size: 11px;
+  width: 100%;
+  min-width: 60px;
+}
+
+.db-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.db-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 12px;
+  font-family: monospace;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.db-btn:hover {
+  background: var(--accent);
+  color: var(--bg);
+}

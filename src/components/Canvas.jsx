@@ -22,27 +22,31 @@ import CheckBox from './Componentes/CheckBox';
 import RadioButton from './Componentes/RadioButton';
 import ComboBox from './Componentes/ComboBox';
 import ListBox from './Componentes/ListBox';
-import PictureBox from './Componentes/PictureBox';
+import Data from './Componentes/Data';
 import Timer from './Componentes/Timer';
 import Shape from './Componentes/Shape';
 import Line from './Componentes/Line';
 import ImageComp from './Componentes/Image';
 import ScrollBar from './Componentes/ScrollBar';
-import Data from './Componentes/Data';
 import Table from './Componentes/Table';
+import Loader from './Componentes/Loader';
+import Tabs from './Componentes/Tabs';
+import Overlay from './Componentes/Overlay';
+import DataRepeater from './Componentes/DataRepeater';
+import Form from './Componentes/Form';
 
 const componentMap = {
   Window, Frame, Row, Button, Text, Label: Text, Input: TextBox, TextBox, CheckBox, RadioButton,
-  ComboBox, ListBox, PictureBox, Timer, Shape, Line, Image: ImageComp,
-  HScrollBar: ScrollBar, VScrollBar: ScrollBar, Data, Table
+  ComboBox, ListBox, Timer, Shape, Line, Image: ImageComp,
+  HScrollBar: ScrollBar, VScrollBar: ScrollBar, Data, Table, Loader, Tabs, Overlay, DataRepeater, Form
 };
 
-const CONTAINER_TYPES = ['Window', 'Frame', 'Row', 'PictureBox'];
+const CONTAINER_TYPES = ['Window', 'Frame', 'Row', 'Tabs', 'DataRepeater', 'Form'];
 
 // ─── Draggable component with position-aware drop detection ─────────────────
 function DraggableComponent({
   comp, rowId, topRowId, index, totalSiblings, selectedId, onSelect, onDelete, onDuplicate,
-  onAddComponent, activeWindow, onMoveComponent, rowDirection, onNavigate
+  onAddComponent, activeWindow, onMoveComponent, rowDirection, onNavigate, onUpdateComponent, database, onSaveRecord
 }) {
   const currentTopRowId = topRowId || rowId;
   const ref = useRef(null);
@@ -79,6 +83,21 @@ function DraggableComponent({
       if (!clientOffset) return;
 
       const isHorizontal = rowDirection === 'row';
+      const isContainer = CONTAINER_TYPES.includes(comp.type);
+
+      // Detection for "Inside" drop if it's a container
+      const margin = 12; 
+      if (isContainer) {
+        const isInside = clientOffset.x > hoverRect.left + margin && 
+                         clientOffset.x < hoverRect.right - margin &&
+                         clientOffset.y > hoverRect.top + margin &&
+                         clientOffset.y < hoverRect.bottom - margin;
+        
+        if (isInside) {
+          setDropIndicator('inside');
+          return;
+        }
+      }
 
       if (isHorizontal) {
         const midX = hoverRect.left + hoverRect.width / 2;
@@ -98,13 +117,19 @@ function DraggableComponent({
       // Check if we are directly over this wrapper and not a child container
       if (!monitor.isOver({ shallow: true })) return;
 
-      const insertIndex = dropIndicator === 'before' ? index : index + 1;
-      if (item.id === undefined) {
-        // Toolbox item
-        onAddComponent(item.type, currentTopRowId, insertIndex, rowId !== currentTopRowId ? rowId : null);
+      if (dropIndicator === 'inside') {
+        if (item.id === undefined) {
+          onAddComponent(item.type, topRowId, 0, comp.id);
+        } else {
+          onMoveComponent(item, topRowId, 0, comp.id);
+        }
       } else {
-        // Existing component
-        onMoveComponent(item, rowId, insertIndex);
+        const insertIndex = dropIndicator === 'before' ? index : index + 1;
+        if (item.id === undefined) {
+          onAddComponent(item.type, currentTopRowId, insertIndex, rowId !== currentTopRowId ? rowId : null);
+        } else {
+          onMoveComponent(item, rowId, insertIndex, null, rowId !== currentTopRowId ? rowId : null);
+        }
       }
       setDropIndicator(null);
       return { handled: true };
@@ -144,6 +169,14 @@ function DraggableComponent({
   }
 
   const isContainer = CONTAINER_TYPES.includes(comp.type);
+  
+  // Always hide Overlay from the row flow. 
+  // It's rendered at the top level when open, 
+  // and accessed via the bottom indicators for selection.
+  if (comp.type === 'Overlay') {
+    return null; 
+  }
+
   const childCount = comp.children?.length || 0;
   const isHorizontal = rowDirection === 'row';
 
@@ -171,6 +204,7 @@ function DraggableComponent({
           onMoveComponent={onMoveComponent}
           rowDirection={comp.props?.layout?.direction || 'row'}
           onNavigate={onNavigate}
+          onUpdateComponent={onUpdateComponent}
         />
     ));
   };
@@ -185,10 +219,13 @@ function DraggableComponent({
 
   if (isWidthFill) {
     sizingStyle.flexGrow = 1;
-    sizingStyle.flexShrink = 1;
     sizingStyle.flexBasis = '0%';
     sizingStyle.minWidth = 0;
-    sizingStyle.alignSelf = 'stretch';
+    // Only stretch vertically if NOT in a row-direction layout (where it would force height)
+    // or if height is also fill.
+    if (rowDirection === 'column' || isHeightFill) {
+      sizingStyle.alignSelf = 'stretch';
+    }
   } else if (sizing?.widthMode === 'hug') {
     sizingStyle.flexShrink = 0;
   }
@@ -202,8 +239,12 @@ function DraggableComponent({
   // Calculate padding based on drop indicator to create the "gap"
   const wrapperPadding = {};
   if (isOver && dropIndicator) {
-    const gapSize = 48; // 24px + 24px
-    if (isHorizontal) {
+    const gapSize = 48;
+    if (dropIndicator === 'inside') {
+      wrapperPadding.outline = '2px dashed var(--accent)';
+      wrapperPadding.outlineOffset = '-2px';
+      wrapperPadding.backgroundColor = 'rgba(0,255,0,0.05)';
+    } else if (isHorizontal) {
       if (dropIndicator === 'before') wrapperPadding.paddingLeft = gapSize;
       else wrapperPadding.paddingRight = gapSize;
     } else {
@@ -269,13 +310,19 @@ function DraggableComponent({
         // Pass override sizing to the component
         width={isWidthFill ? '100%' : (isWidthHug ? 'auto' : (comp.props.width || 'auto'))}
         height={isHeightFill ? '100%' : (isHeightHug ? 'auto' : (comp.props.height || 'auto'))}
+        database={database}
+        onSaveRecord={onSaveRecord}
         // If Table and bound to database, override rows
         rows={comp.type === 'Table' && comp.props.dataSourceType === 'database' && comp.props.dataSource && database?.data?.[comp.props.dataSource] 
               ? database.data[comp.props.dataSource] 
               : comp.props.rows}
-        onAddChild={isContainer ? type => onAddComponent(type, currentTopRowId, childCount, comp.id) : undefined}
+        onAddChild={isContainer ? (type, extra) => onAddComponent(type, currentTopRowId, childCount, comp.id, extra) : undefined}
         onMoveChild={isContainer ? item => onMoveComponent(item, currentTopRowId, childCount, comp.id) : undefined}
         onNavigate={onNavigate}
+        onUpdate={(props) => onUpdateComponent(comp.id, props)}
+        onSaveRecord={onSaveRecord}
+        database={database}
+        tableName={comp.props.tableName}
       >
         {isContainer && renderContainerChildren()}
       </Component>
@@ -286,7 +333,7 @@ function DraggableComponent({
 // ─── Row of layout (with position-aware drop on empty area) ─────────────────
 function LayoutRow({
   row, rowIndex, selectedId, onSelect, onDelete, onDuplicate,
-  onAddComponent, activeWindow, onMoveComponent, onDropToRow, onSelectRow, onNavigate
+  onAddComponent, activeWindow, onMoveComponent, onDropToRow, onSelectRow, onNavigate, onUpdateComponent, database, onSaveRecord
 }) {
   const layout = row.layout || { direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false };
   const rowRef = useRef(null);
@@ -410,6 +457,9 @@ function LayoutRow({
           rowDirection={layout.direction}
           topRowId={row.id}
           onNavigate={onNavigate}
+          onUpdateComponent={onUpdateComponent}
+          onSaveRecord={onSaveRecord}
+          database={database}
         />
       ))}
 
@@ -465,20 +515,8 @@ function NewRowDropZone({ onDropNewRow, afterIndex }) {
 
 // ─── Main Canvas ────────────────────────────────────────────────────────────
 function Canvas({
-  rows,
-  selectedId,
-  onSelect,
-  onDelete,
-  onDuplicate,
-  viewMode,
-  onAddToRow,
-  onAddNewRow,
-  onMoveComponent,
-  onSelectRow,
-  activeWindow,
-  canvasPadding,
-  database,
-  onNavigate
+  rows, selectedId, onSelect, onDelete, onDuplicate, viewMode, onAddToRow, onAddNewRow,
+  onMoveComponent, onSelectRow, activeWindow, canvasPadding, database, onNavigate, onUpdateComponent, onSaveRecord
 }) {
   // Drop on empty canvas → new row
   const [{ isOver }, drop] = useDrop(() => ({
@@ -492,24 +530,24 @@ function Canvas({
   }), [onAddNewRow]);
 
   const cPad = canvasPadding || { top: 20, right: 20, bottom: 20, left: 20 };
-  const isSingleWindow = rows.length === 1 && rows[0].children.length === 1 && rows[0].children[0].type === 'Window';
+  const isSingleComponent = rows.length === 1 && rows[0].children.length === 1;
 
   return (
     <div className={`canvas ${viewMode}`}>
       <div
         ref={drop}
-        className={`preview-area ${isSingleWindow ? 'centered' : ''}`}
+        className={`preview-area ${isSingleComponent ? 'centered' : ''}`}
         style={{
           background: isOver ? 'rgba(0,255,0,0.02)' : undefined,
           paddingTop: cPad.top,
           paddingRight: cPad.right,
           paddingBottom: cPad.bottom,
           paddingLeft: cPad.left,
-          display: isSingleWindow ? 'flex' : 'block',
-          flexDirection: isSingleWindow ? 'column' : undefined,
-          alignItems: isSingleWindow ? 'center' : undefined,
-          justifyContent: isSingleWindow ? 'center' : undefined,
-          minHeight: isSingleWindow ? '100%' : undefined,
+          display: isSingleComponent ? 'flex' : 'block',
+          flexDirection: isSingleComponent ? 'column' : undefined,
+          alignItems: isSingleComponent ? 'center' : undefined,
+          justifyContent: isSingleComponent ? 'center' : undefined,
+          minHeight: isSingleComponent ? '100%' : undefined,
         }}
         onClick={() => onSelect(null)}
       >
@@ -522,7 +560,7 @@ function Canvas({
           </div>
         )}
 
-        {rows.map((row, ri) => (
+        {rows.filter(r => r.children.some(c => c.type !== 'Overlay')).map((row, ri) => (
           <React.Fragment key={row.id}>
             {/* Between-row drop zone (before first row) */}
             {ri === 0 && (
@@ -542,12 +580,15 @@ function Canvas({
                 onSelect={onSelect}
                 onDelete={onDelete}
                 onDuplicate={onDuplicate}
-                onAddComponent={(type, rowId, index, parentId) => onAddToRow(type, rowId, index, parentId)}
+                onAddComponent={(type, rowId, index, parentId, extra) => onAddToRow(type, rowId, index, parentId, extra)}
                 activeWindow={activeWindow}
                 onMoveComponent={onMoveComponent}
                 onDropToRow={onAddToRow}
                 onSelectRow={onSelectRow}
                 onNavigate={onNavigate}
+                onUpdateComponent={onUpdateComponent}
+                onSaveRecord={onSaveRecord}
+                database={database}
               />
 
             {/* Between-row drop zone (after each row) */}
@@ -560,6 +601,99 @@ function Canvas({
             />
           </React.Fragment>
         ))}
+
+        {/* Overlay Indicators */}
+        {rows.some(r => {
+          const hasOverlay = (items) => items.some(it => it.type === 'Overlay' || (it.children && hasOverlay(it.children)));
+          return hasOverlay(r.children);
+        }) && (
+          <div style={{ marginTop: 24, borderTop: '1px dashed var(--border)', paddingTop: 16 }}>
+            <div style={{ fontSize: 10, color: 'var(--accent)', marginBottom: 10, letterSpacing: 1, fontWeight: 'bold' }}>[ ACTIVE OVERLAYS ]</div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {rows.flatMap(r => {
+                const getOverlays = (items) => {
+                  let found = [];
+                  items.forEach(it => {
+                    if (it.type === 'Overlay') found.push(it);
+                    if (it.children) found = [...found, ...getOverlays(it.children)];
+                  });
+                  return found;
+                };
+                return getOverlays(r.children);
+              }).map(ov => (
+                <div 
+                  key={ov.id} 
+                  onClick={(e) => { e.stopPropagation(); onSelect(ov.id); }}
+                  style={{ 
+                    padding: '6px 12px', 
+                    border: selectedId === ov.id ? '2px solid var(--accent)' : '1px solid var(--border)',
+                    background: selectedId === ov.id ? 'var(--selected)' : 'rgba(0,0,0,0.4)',
+                    fontSize: 11,
+                    cursor: 'pointer',
+                    fontFamily: 'monospace',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    boxShadow: selectedId === ov.id ? '0 0 15px var(--accent)' : 'none',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <span style={{ opacity: 0.5, fontSize: 9 }}>OVERLAY:</span> {ov.props.title || 'Untitled'}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Render Open Overlays at top level of Canvas */}
+        {rows.flatMap(r => {
+           const findOpen = (items) => {
+             let found = [];
+             items.forEach(it => {
+               if (it.type === 'Overlay' && it.props.isOpen) {
+                 found.push({ ...it, rowId: r.id });
+               }
+               if (it.children) found = [...found, ...findOpen(it.children)];
+             });
+             return found;
+           };
+           return findOpen(r.children);
+        }).map(ov => {
+          const OverlayComp = componentMap['Overlay'];
+          const childCount = ov.children?.length || 0;
+          return (
+            <OverlayComp
+              key={ov.id}
+              {...ov.props}
+              id={ov.id}
+              onUpdate={(props) => onUpdateComponent(ov.id, props)}
+              onAddChild={(type, extra) => onAddToRow(type, ov.rowId, childCount, ov.id, extra)}
+              onMoveChild={item => onMoveComponent(item, ov.rowId, childCount, ov.id)}
+            >
+              {(ov.children || []).map((child, ci) => (
+                <DraggableComponent
+                  key={child.id}
+                  comp={child}
+                  rowId={ov.rowId}
+                  topRowId={ov.rowId}
+                  index={ci}
+                  totalSiblings={ov.children.length}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                  onDelete={onDelete}
+                  onDuplicate={onDuplicate}
+                  onAddComponent={onAddToRow}
+                  activeWindow={activeWindow}
+                  onMoveComponent={onMoveComponent}
+                  rowDirection={ov.props.layout?.direction || 'column'}
+                  onNavigate={onNavigate}
+                  onUpdateComponent={onUpdateComponent}
+                  database={database}
+                />
+              ))}
+            </OverlayComp>
+          );
+        })}
 
         
       </div>

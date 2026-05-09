@@ -11,6 +11,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import IconPicker from './IconPicker';
 
+const mkId = () => Math.random().toString(36).substring(2, 9);
+
 // ─── Panel AutoLayout (solo para filas) ──────────────────────────────────────
 function AutoLayoutPanel({ layout = {}, onUpdate }) {
   const [localGap, setLocalGap] = useState(layout.gap ?? 8);
@@ -142,18 +144,28 @@ function AutoLayoutPanel({ layout = {}, onUpdate }) {
 }
 
 // ─── Inspector principal ──────────────────────────────────────────────────────
-function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows, database, canvasPadding, onCanvasPaddingChange, selectedId, themeColors = {}, activeScreen, screens, onUpdateScreen }) {
+function Inspector({ 
+  component, isRow, onUpdate, onDelete, onDuplicate, 
+  windows, database, canvasPadding, onCanvasPaddingChange, 
+  selectedId, themeColors = {}, activeScreen, screens, onUpdateScreen,
+  overlays = []
+}) {
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [localProps, setLocalProps] = useState({});
-
+  const [tabsText, setTabsText] = useState('');
   useEffect(() => {
     if (component) {
       const layoutProps = isRow
         ? (component.layout || {})
         : (component.props?.layout || {});
-      setLocalProps({ ...component.props, ...layoutProps });
+      const mergedProps = { ...component.props, ...layoutProps };
+      setLocalProps(mergedProps);
+      
+      if (component.type === 'Tabs') {
+        setTabsText((mergedProps.tabs || []).map(t => t.label).join(', '));
+      }
     }
-  }, [component?.id]);
+  }, [component?.id, component?.props]);
 
   const commitChange = useCallback((field, value) => {
     if (component) onUpdate(component.id, { [field]: value });
@@ -178,6 +190,32 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
             onChange={e => onUpdateScreen(activeScreen.id, { name: e.target.value })}
           />
         </div>
+
+        <div className="property-divider" style={{ opacity: 0.3 }} />
+        
+        <div className="property-group">
+          <label>WEB TITLE (Export)</label>
+          <input 
+            type="text" 
+            value={activeScreen?.settings?.webTitle || ''} 
+            onChange={e => onUpdateScreen(activeScreen.id, { settings: { ...activeScreen.settings, webTitle: e.target.value } })}
+            placeholder="Global title if Screen 1"
+          />
+        </div>
+
+        <div className="property-group">
+          <label>META TAGS (Export)</label>
+          <textarea 
+            value={activeScreen?.settings?.metaTags || ''} 
+            onChange={e => onUpdateScreen(activeScreen.id, { settings: { ...activeScreen.settings, metaTags: e.target.value } })}
+            placeholder='e.g. <meta name="description" content="..."> '
+            rows={3}
+            style={{ fontSize: 10, fontFamily: 'monospace' }}
+          />
+        </div>
+
+        <div className="property-divider" style={{ opacity: 0.3 }} />
+
         <div className="property-group">
           <label>AUTO JUMP (sec)</label>
           <input 
@@ -252,9 +290,102 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
   // ── Inspector normal para componentes ─────────────────────────────────────
   const updateLocal = (field, value) => setLocalProps(prev => ({ ...prev, [field]: value }));
   const updateAndCommit = (field, value) => { updateLocal(field, value); commitChange(field, value); };
-  const showLayoutPanel = ['Window', 'Frame', 'Row'].includes(component.type);
+  
+  const renderDataBinding = () => {
+    const tableNames = Object.keys(database?.data || {});
+    const findTableContext = (id) => {
+      const findInRows = (items, parentTable = null) => {
+        for (const item of items) {
+          let currentTable = parentTable;
+          if (item.type === 'Form') currentTable = item.props.targetTable;
+          if (item.type === 'DataRepeater') currentTable = item.props.tableName;
+          if (item.id === id) return currentTable;
+          if (item.children) {
+            const result = findInRows(item.children, currentTable);
+            if (result) return result;
+          }
+        }
+        return null;
+      };
+      return findInRows(activeScreen?.rows || []);
+    };
 
-  const renderNumber = (field, label, placeholder = '', min) => (
+    const contextTable = findTableContext(component.id);
+    const selectedTable = localProps.dataSourceTable || contextTable || '';
+    const fields = (database?.tables || []).find(t => t.name === selectedTable)?.fields || [];
+    const isInherited = !localProps.dataSourceTable && contextTable;
+
+    return (
+      <div className="property-group">
+        <div className="al-section-title">DYNAMIC CONTENT</div>
+        <label>CONTENT TYPE</label>
+        <select value={localProps.dataSourceType||'manual'} onChange={e => updateAndCommit('dataSourceType', e.target.value)}>
+          <option value="manual">Static Content (Manual)</option>
+          <option value="database">Dynamic Data (Linked)</option>
+        </select>
+
+        {localProps.dataSourceType === 'database' && (
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {!isInherited && (
+              <div>
+                <label>SOURCE TABLE</label>
+                <select 
+                  value={localProps.dataSourceTable || ''} 
+                  onChange={e => {
+                    updateAndCommit('dataSourceTable', e.target.value);
+                    updateAndCommit('dataField', ''); 
+                  }}
+                >
+                  <option value="">-- Select Table --</option>
+                  {tableNames.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            )}
+            
+            {isInherited && (
+              <div style={{ fontSize: 9, color: 'var(--accent)', marginBottom: 4 }}>
+                [ Linked to table: <b>{contextTable}</b> ]
+              </div>
+            )}
+
+            {(selectedTable) && (
+              <div>
+                <label>MAPPING FIELD</label>
+                <select 
+                  value={localProps.dataField || ''} 
+                  onChange={e => updateAndCommit('dataField', e.target.value)}
+                >
+                  <option value="">-- Select Field --</option>
+                  {fields.map(f => <option key={f.name} value={f.name}>{f.name} ({f.type})</option>)}
+                </select>
+              </div>
+            )}
+
+            <div className="property-group" style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+              <input 
+                type="checkbox" 
+                checked={localProps.requireLogin || false} 
+                onChange={e => updateAndCommit('requireLogin', e.target.checked)}
+                style={{ width: 'auto', marginRight: 8 }}
+              />
+              <label style={{ margin: 0, cursor: 'pointer' }} onClick={() => updateAndCommit('requireLogin', !localProps.requireLogin)}>
+                REQUIRE LOGIN
+              </label>
+            </div>
+
+            <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 4, fontStyle: 'italic' }}>
+              {selectedTable ? `[ Showing ${selectedTable}.${localProps.dataField || '?'} ]` : '[ Link a table first ]'}
+            </div>
+          </div>
+        )}
+        <div className="property-divider" />
+      </div>
+    );
+  };
+
+  const showLayoutPanel = ['Window', 'Frame', 'Row', 'DataRepeater'].includes(component.type);
+
+  const renderNumber = (field, label, placeholder = '', onAfterCommit) => (
     <div className="property-group">
       <label>{label}</label>
       <input
@@ -265,10 +396,23 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
           const v = localProps[field];
           if (v === '' || v === undefined) { commitChange(field, 0); updateLocal(field, 0); return; }
           const n = parseInt(v, 10);
-          if (!isNaN(n)) { commitChange(field, n); updateLocal(field, n); }
+          if (!isNaN(n)) { 
+            commitChange(field, n); 
+            updateLocal(field, n); 
+            if (onAfterCommit) onAfterCommit(n);
+          }
           else updateLocal(field, component.props[field] || 0);
         }}
-        onKeyDown={e => { if (e.key === 'Enter') { const n = parseInt(localProps[field], 10); if (!isNaN(n)) { commitChange(field, n); } e.target.blur(); } }}
+        onKeyDown={e => { 
+          if (e.key === 'Enter') { 
+            const n = parseInt(localProps[field], 10); 
+            if (!isNaN(n)) { 
+              commitChange(field, n); 
+              if (onAfterCommit) onAfterCommit(n);
+            } 
+            e.target.blur(); 
+          } 
+        }}
         placeholder={placeholder}
       />
     </div>
@@ -330,6 +474,7 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
     const t = component.type;
     switch (t) {
       case 'Window': return (<>
+        {renderDataBinding()}
         <div className="property-group"><label>TITLE</label><input type="text" value={localProps.title||''} onChange={e => updateAndCommit('title', e.target.value)} /></div>
         {renderNumber('width','WIDTH (px)','400')}
         <div className="property-group"><label>HEIGHT</label>
@@ -349,9 +494,10 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         </div>
         {localProps.showClose && (
           <div className="property-group">
-            <label>CLOSE TARGET SCREEN</label>
+            <label>CLOSE ACTION</label>
             <select value={localProps.closeNextScreenId||''} onChange={e => updateAndCommit('closeNextScreenId', e.target.value)}>
-              <option value="">-- Select Screen --</option>
+              <option value="">-- Select --</option>
+              <option value="__close_window__">Close Window</option>
               {(screens||[]).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
@@ -375,8 +521,11 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         {renderColor('TEXT COLOR','textColor','#ffff00')}
         {renderColor('BACKGROUND','bgColor','#000000', true)}
         {renderColor('BORDER COLOR','borderColor','#00ff00')}
+        <div className="property-divider" />
+        {renderDataBinding()}
       </>);
       case 'Button': return (<>
+        {localProps.action !== 'submit' && renderDataBinding()}
         <div className="property-group"><label>TEXT</label><input type="text" value={localProps.text||''} onChange={e => updateAndCommit('text', e.target.value)} /></div>
         {renderNumber('width','WIDTH (px)','80')}
         <div className="property-group"><label>DISABLED</label><input type="checkbox" checked={localProps.disabled||false} onChange={e => updateAndCommit('disabled', e.target.checked)} /></div>
@@ -388,24 +537,29 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
           <select value={localProps.action||'none'} onChange={e => updateAndCommit('action', e.target.value)}>
             <option value="none">None</option>
             <option value="screen">Navigate to Screen</option>
-            <option value="navigate">Navigate to Window</option>
+            <option value="overlay">Open Overlay</option>
             <option value="external">Open External Link</option>
             <option value="email">Send Email</option>
+            <option value="submit">Submit Form (Save to DB)</option>
           </select>
         </div>
-        {localProps.action === 'screen' && (
+        {localProps.action === 'screen' && (<>
           <div className="property-group"><label>TARGET SCREEN</label>
             <select value={localProps.targetScreenId||''} onChange={e => updateAndCommit('targetScreenId', e.target.value)}>
               <option value="">-- Select Screen --</option>
               {(screens||[]).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
-        )}
-        {localProps.action === 'navigate' && (
-          <div className="property-group"><label>TARGET WINDOW</label>
-            <select value={localProps.targetWindow||''} onChange={e => updateAndCommit('targetWindow', e.target.value)}>
-              <option value="">-- Select --</option>
-              {(windows||[]).map(w => <option key={w.id} value={w.id}>{w.props.title}</option>)}
+          <div className="property-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <label style={{ margin: 0 }}>STAGGERED (overlay)</label>
+            <input type="checkbox" checked={localProps.staggered||false} onChange={e => updateAndCommit('staggered', e.target.checked)} />
+          </div>
+        </>)}
+        {localProps.action === 'overlay' && (
+          <div className="property-group"><label>TARGET OVERLAY</label>
+            <select value={localProps.targetOverlayId||''} onChange={e => updateAndCommit('targetOverlayId', e.target.value)}>
+              <option value="">-- Select Overlay --</option>
+              {(overlays||[]).map(ov => <option key={ov.id} value={ov.id}>{ov.props?.title || 'Overlay'}</option>)}
             </select>
           </div>
         )}
@@ -416,6 +570,54 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
           <div className="property-group"><label>EMAIL</label><input type="text" value={localProps.mailto||''} onChange={e => updateAndCommit('mailto', e.target.value)} placeholder="user@example.com" /></div>
         )}
       </>);
+      case 'Form': {
+        const tableNames = Object.keys(database?.data || {});
+        const selectedSourceTable = localProps.sourceTable || '';
+        const sourceFields = (database?.tables || []).find(t => t.name === selectedSourceTable)?.fields || [];
+        
+        return (<>
+          <div className="al-section-title">DATA SOURCE (Read)</div>
+          <div className="property-group">
+            <label>SOURCE TABLE</label>
+            <select 
+              value={localProps.sourceTable || ''} 
+              onChange={e => updateAndCommit('sourceTable', e.target.value)}
+            >
+              <option value="">-- None --</option>
+              {tableNames.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          {localProps.sourceTable && (
+            <div className="property-group">
+              <label>FILTER BY FIELD</label>
+              <select value={localProps.filterField || ''} onChange={e => updateAndCommit('filterField', e.target.value)}>
+                <option value="">-- No Filter --</option>
+                {sourceFields.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+              </select>
+            </div>
+          )}
+          {localProps.sourceTable && localProps.filterField && (
+            <div className="property-group">
+              <label>FILTER VALUE</label>
+              <input type="text" value={localProps.filterValue || ''} onChange={e => updateAndCommit('filterValue', e.target.value)} placeholder="Value or {{template}}" />
+            </div>
+          )}
+          <div className="property-divider" />
+          <div className="al-section-title">TARGET (Write)</div>
+          <div className="property-group">
+            <label>TARGET TABLE (Save to)</label>
+            <select 
+              value={localProps.targetTable || ''} 
+              onChange={e => updateAndCommit('targetTable', e.target.value)}
+            >
+              <option value="">-- Select Table --</option>
+              {tableNames.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="property-divider" />
+        </>);
+      }
+
       case 'Text':
       case 'Label': {
         const wrapSelection = (tag) => {
@@ -445,6 +647,7 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         };
 
         return (<>
+          {renderDataBinding()}
           <div className="property-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <label>TEXT</label>
@@ -472,19 +675,104 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
             </select>
           </div>
           {renderColor('TEXT COLOR','textColor','#00ff00')}
-          <div className="property-group"><label>LINK URL</label><input type="text" value={localProps.linkUrl||''} onChange={e => updateAndCommit('linkUrl', e.target.value)} placeholder="https://... (optional)" /></div>
+          <div className="property-divider" />
+          <div className="property-group"><label>ACTION</label>
+            <select value={localProps.action||'none'} onChange={e => updateAndCommit('action', e.target.value)}>
+              <option value="none">None</option>
+              <option value="screen">Navigate to Screen</option>
+              <option value="overlay">Open Overlay</option>
+              <option value="external">Open External Link</option>
+              <option value="email">Send Email</option>
+            </select>
+          </div>
+          {localProps.action === 'screen' && (<>
+            <div className="property-group"><label>TARGET SCREEN</label>
+              <select value={localProps.targetScreenId||''} onChange={e => updateAndCommit('targetScreenId', e.target.value)}>
+                <option value="">-- Select Screen --</option>
+                {(screens||[]).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="property-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <label style={{ margin: 0 }}>STAGGERED (overlay)</label>
+              <input type="checkbox" checked={localProps.staggered||false} onChange={e => updateAndCommit('staggered', e.target.checked)} />
+            </div>
+          </>)}
+          {localProps.action === 'overlay' && (
+            <div className="property-group"><label>TARGET OVERLAY</label>
+              <select value={localProps.targetOverlayId||''} onChange={e => updateAndCommit('targetOverlayId', e.target.value)}>
+                <option value="">-- Select Overlay --</option>
+                {(overlays||[]).map(ov => <option key={ov.id} value={ov.id}>{ov.props?.title || 'Overlay'}</option>)}
+              </select>
+            </div>
+          )}
+          {localProps.action === 'external' && (
+            <div className="property-group"><label>URL</label><input type="text" value={localProps.href||''} onChange={e => updateAndCommit('href', e.target.value)} placeholder="https://..." /></div>
+          )}
+          {localProps.action === 'email' && (
+            <div className="property-group"><label>EMAIL</label><input type="text" value={localProps.mailto||''} onChange={e => updateAndCommit('mailto', e.target.value)} placeholder="user@example.com" /></div>
+          )}
         </>);
       }
       case 'Input':
       case 'TextBox': return (<>
         <div className="property-group"><label>LABEL</label><input type="text" value={localProps.label||''} onChange={e => updateAndCommit('label', e.target.value)} placeholder="e.g. USERNAME" /></div>
         <div className="property-group"><label>PLACEHOLDER</label><input type="text" value={localProps.placeholder||''} onChange={e => updateAndCommit('placeholder', e.target.value)} /></div>
+        
+        {(() => {
+          // Find the parent table context (Form or DataRepeater)
+          // We look for the closest ancestor that has a table defined.
+          const findTableContext = (id) => {
+            const findInRows = (items, parentTable = null) => {
+              for (const item of items) {
+                let currentTable = parentTable;
+                if (item.type === 'Form') currentTable = item.props.targetTable;
+                if (item.type === 'DataRepeater') currentTable = item.props.tableName;
+                
+                if (item.id === id) return currentTable;
+                if (item.children) {
+                  const result = findInRows(item.children, currentTable);
+                  if (result) return result;
+                }
+              }
+              return null;
+            };
+            return findInRows(activeScreen?.rows || []);
+          };
+
+          const contextTable = findTableContext(component.id);
+          const fields = contextTable ? ((database?.tables || []).find(t => t.name === contextTable)?.fields || []) : [];
+
+          return (
+            <div className="property-group">
+              <label>MAPPING FIELD</label>
+              {fields.length > 0 ? (
+                <select value={localProps.dataField || ''} onChange={e => updateAndCommit('dataField', e.target.value)}>
+                  <option value="">-- Select Field --</option>
+                  {fields.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+                </select>
+              ) : (
+                <input type="text" value={localProps.dataField || ''} onChange={e => updateAndCommit('dataField', e.target.value)} placeholder="e.g. email" />
+              )}
+            </div>
+          );
+        })()}
         {renderNumber('width','WIDTH (px)','150')}
         <div className="property-group"><label>INPUT TYPE</label>
           <select value={localProps.inputType||'text'} onChange={e => updateAndCommit('inputType', e.target.value)}>
             <option value="text">Text</option><option value="password">Password</option><option value="number">Number</option><option value="email">Email</option>
           </select>
         </div>
+        <div className="property-divider" />
+        <div className="property-group"><label>OTP MODE</label><input type="checkbox" checked={localProps.isOTP||false} onChange={e => updateAndCommit('isOTP', e.target.checked)} /></div>
+        {localProps.isOTP && (
+          <div className="property-group"><label>DIGITS</label>
+            <select value={localProps.digits||4} onChange={e => updateAndCommit('digits', parseInt(e.target.value))}>
+              <option value={4}>4 Digits</option>
+              <option value={6}>6 Digits</option>
+            </select>
+          </div>
+        )}
+        <div className="property-divider" />
         <div className="property-group"><label>READ ONLY</label><input type="checkbox" checked={localProps.readOnly||false} onChange={e => updateAndCommit('readOnly', e.target.checked)} /></div>
         <div className="property-group"><label>DISABLED</label><input type="checkbox" checked={localProps.disabled||false} onChange={e => updateAndCommit('disabled', e.target.checked)} /></div>
         {renderColor('TEXT COLOR','textColor','#00ff00')}
@@ -526,9 +814,72 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         {renderColor('COLOR','color','#00ff00')}
       </>);
       case 'Image': return (<>
-        <div className="property-group"><label>IMAGE URL</label><input type="text" value={localProps.src||''} onChange={e => updateAndCommit('src', e.target.value)} placeholder="https://..." /></div>
-        {renderNumber('width','WIDTH (px)','80')}
-        {renderNumber('height','HEIGHT (px)','80')}
+        {renderDataBinding()}
+        <div className="property-group" style={{ opacity: localProps.dataSourceType === 'database' ? 0.4 : 1, pointerEvents: localProps.dataSourceType === 'database' ? 'none' : 'auto' }}>
+          <label>IMAGE SOURCE {localProps.dataSourceType === 'database' && '(Overridden by DB)'}</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <input type="text" value={localProps.src||''} onChange={e => updateAndCommit('src', e.target.value)} placeholder="https://..." />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <label style={{ margin: 0, fontSize: 9, cursor: 'pointer', border: '1px solid var(--border)', padding: '2px 6px', background: 'rgba(255,255,255,0.05)' }}>
+                Upload File
+                <input 
+                  type="file" 
+                  style={{ display: 'none' }} 
+                  accept="image/*,.gif"
+                  onChange={e => {
+                    const file = e.target.files[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        const res = ev.target.result;
+                        updateAndCommit('src', res);
+                        const img = new window.Image();
+                        img.onload = () => {
+                          updateAndCommit('aspectRatio', img.width / img.height);
+                          updateAndCommit('width', img.width);
+                          updateAndCommit('height', img.height);
+                        };
+                        img.src = res;
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                />
+              </label>
+              {localProps.src?.startsWith('data:') && <span style={{ fontSize: 8, color: 'var(--accent)' }}>Base64 Loaded</span>}
+            </div>
+          </div>
+        </div>
+        {renderNumber('width','WIDTH (px)','80', (newVal) => {
+          if (localProps.keepAspect && localProps.aspectRatio) {
+            const newHeight = Math.round(newVal / localProps.aspectRatio);
+            updateAndCommit('height', newHeight);
+          }
+        })}
+        {renderNumber('height','HEIGHT (px)','80', (newVal) => {
+          if (localProps.keepAspect && localProps.aspectRatio) {
+            const newWidth = Math.round(newVal * localProps.aspectRatio);
+            updateAndCommit('width', newWidth);
+          }
+        })}
+        
+        {component.props.sizing?.widthMode === 'fixed' && component.props.sizing?.heightMode === 'fixed' && (
+          <div className="property-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <label style={{ margin: 0 }}>KEEP ASPECT</label>
+            <input 
+              type="checkbox" 
+              checked={localProps.keepAspect||false} 
+              onChange={e => {
+                const checked = e.target.checked;
+                updateAndCommit('keepAspect', checked);
+                if (checked && localProps.width && localProps.height && !localProps.aspectRatio) {
+                  updateAndCommit('aspectRatio', localProps.width / localProps.height);
+                }
+              }} 
+            />
+          </div>
+        )}
+
         <div className="property-group"><label>ALT TEXT</label><input type="text" value={localProps.alt||''} onChange={e => updateAndCommit('alt', e.target.value)} /></div>
         {renderNumber('borderThickness', 'BORDER', '1')}
         {renderColor('BORDER COLOR', 'borderColor', '')}
@@ -557,21 +908,59 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         <div className="property-group"><label>ENABLED</label><input type="checkbox" checked={localProps.enabled||false} onChange={e => updateAndCommit('enabled', e.target.checked)} /></div>
       </>);
       case 'ComboBox': return (<>
-        <div className="property-group"><label>ITEMS (comma separated)</label>
-          <textarea value={(localProps.items||[]).join(', ')} onChange={e => updateAndCommit('items', e.target.value.split(',').map(s=>s.trim()).filter(Boolean))} rows={3} />
+        <div className="al-section-title">OPTIONS SOURCE (The List)</div>
+        <div className="property-group">
+          <label>SOURCE TABLE</label>
+          <select value={localProps.optionTable||''} onChange={e => updateAndCommit('optionTable', e.target.value)}>
+            <option value="">-- Select Table --</option>
+            {Object.keys(database?.data||{}).map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
         </div>
+        {localProps.optionTable && (
+          <div className="property-group">
+            <label>DISPLAY FIELD</label>
+            <select value={localProps.optionField||''} onChange={e => updateAndCommit('optionField', e.target.value)}>
+              <option value="">-- Select Field --</option>
+              {((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+            </select>
+          </div>
+        )}
+        <div className="property-divider" />
+        {renderDataBinding()}
+        <div className="property-divider" />
         {renderNumber('width','WIDTH (px)','150')}
+        <div className="property-group"><label>SELECTED INDEX</label><input type="number" value={localProps.selectedIndex||0} onChange={e => updateAndCommit('selectedIndex', parseInt(e.target.value))} /></div>
         {renderColor('TEXT COLOR','textColor','#00ff00')}
-        {renderColor('BACKGROUND','bgColor','#000000')}
+        {renderColor('BORDER COLOR','borderColor','#00ff00')}
+        {renderColor('BACKGROUND','bgColor','#000000', true)}
       </>);
       case 'ListBox': return (<>
-        <div className="property-group"><label>ITEMS (comma separated)</label>
-          <textarea value={(localProps.items||[]).join(', ')} onChange={e => updateAndCommit('items', e.target.value.split(',').map(s=>s.trim()).filter(Boolean))} rows={3} />
+        <div className="al-section-title">OPTIONS SOURCE (The List)</div>
+        <div className="property-group">
+          <label>SOURCE TABLE</label>
+          <select value={localProps.optionTable||''} onChange={e => updateAndCommit('optionTable', e.target.value)}>
+            <option value="">-- Select Table --</option>
+            {Object.keys(database?.data||{}).map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
         </div>
+        {localProps.optionTable && (
+          <div className="property-group">
+            <label>DISPLAY FIELD</label>
+            <select value={localProps.optionField||''} onChange={e => updateAndCommit('optionField', e.target.value)}>
+              <option value="">-- Select Field --</option>
+              {((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+            </select>
+          </div>
+        )}
+        <div className="property-divider" />
+        {renderDataBinding()}
+        <div className="property-divider" />
         {renderNumber('width','WIDTH (px)','150')}
         {renderNumber('height','HEIGHT (px)','100')}
+        <div className="property-group"><label>MULTI-SELECT</label><input type="checkbox" checked={localProps.multiSelect||false} onChange={e => updateAndCommit('multiSelect', e.target.checked)} /></div>
         {renderColor('TEXT COLOR','textColor','#00ff00')}
-        {renderColor('BACKGROUND','bgColor','#000000')}
+        {renderColor('BORDER COLOR','borderColor','#00ff00')}
+        {renderColor('BACKGROUND','bgColor','#000000', true)}
       </>);
       case 'Table': return (<>
         {renderNumber('width','WIDTH (px)','400')}
@@ -642,6 +1031,39 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         <button onClick={() => { const newRow = {}; (localProps.columns||[]).forEach(c => { newRow[c.name] = ''; }); updateAndCommit('rows', [...(localProps.rows||[]), newRow]); }}
           style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontFamily: 'monospace', fontSize: 10, padding: '3px 8px', width: '100%', marginTop: 4 }}>+ Add Row</button>
       </>);
+      case 'DataRepeater': {
+        const selectedTable = localProps.tableName || '';
+        const fields = (database?.tables || []).find(t => t.name === selectedTable)?.fields || [];
+        return (<>
+          <div className="al-section-title">DATA SOURCE</div>
+          <div className="property-group">
+            <label>TABLE</label>
+            <select value={localProps.tableName||''} onChange={e => updateAndCommit('tableName', e.target.value)}>
+              <option value="">-- Select Table --</option>
+              {(database?.tables||[]).map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+            </select>
+          </div>
+          <div className="property-group">
+            <label>FILTER BY FIELD</label>
+            <select value={localProps.filterField || ''} onChange={e => updateAndCommit('filterField', e.target.value)}>
+              <option value="">-- No Filter --</option>
+              {fields.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+            </select>
+          </div>
+          {localProps.filterField && (
+            <div className="property-group">
+              <label>FILTER VALUE</label>
+              <input type="text" value={localProps.filterValue || ''} onChange={e => updateAndCommit('filterValue', e.target.value)} placeholder="Value or {{template}}" />
+            </div>
+          )}
+          <div className="property-divider" />
+        
+        <AutoLayoutPanel
+          layout={localProps.layout || {}}
+          onUpdate={(changes) => onUpdate(component.id, { layout: { ...(localProps.layout || {}), ...changes } })}
+        />
+      </>);
+    }
       case 'Data': return (<>
         <div className="property-group"><label>TABLE</label>
           <input type="text" value={localProps.tableName||''} onChange={e => updateAndCommit('tableName', e.target.value)} list="table-list-insp" />
@@ -655,6 +1077,49 @@ function Inspector({ component, isRow, onUpdate, onDelete, onDuplicate, windows,
         <div className="property-group"><label>QUERY / PATH</label>
           <input type="text" value={localProps.query||''} onChange={e => updateAndCommit('query', e.target.value)} />
         </div>
+      </>);
+      case 'Loader': return (<>
+        <div className="property-group"><label>TYPE</label>
+          <select value={localProps.loaderType||'spinner'} onChange={e => updateAndCommit('loaderType', e.target.value)}>
+            <option value="spinner">Spinner</option>
+            <option value="dots">Dots</option>
+            <option value="bar">Bar</option>
+            <option value="bounce">Bounce</option>
+          </select>
+        </div>
+        {renderNumber('speed','SPEED (x)','1')}
+        {renderNumber('thickness','THICKNESS','4')}
+        {renderColor('COLOR','color','#00ff00')}
+      </>);
+      case 'Tabs': return (<>
+        <div className="property-group">
+          <label>TABS (comma separated)</label>
+          <textarea 
+            value={tabsText} 
+            onChange={e => setTabsText(e.target.value)}
+            onBlur={e => {
+              const labels = e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
+              const newTabs = labels.map((l, i) => ({ 
+                id: (localProps.tabs || [])[i]?.id || mkId(), 
+                label: l 
+              }));
+              updateAndCommit('tabs', newTabs);
+            }} 
+            rows={3} 
+          />
+        </div>
+        <div className="property-group"><label>ACTIVE TAB</label>
+          <select value={localProps.activeTabIndex||0} onChange={e => updateAndCommit('activeTabIndex', parseInt(e.target.value))}>
+            {(localProps.tabs||[]).map((t, i) => <option key={i} value={i}>{t.label}</option>)}
+          </select>
+        </div>
+      </>);
+      case 'Overlay': return (<>
+        <div className="property-group"><label>TITLE</label><input type="text" value={localProps.title||''} onChange={e => updateAndCommit('title', e.target.value)} /></div>
+        <div className="property-group"><label>IS OPEN (Editor)</label><input type="checkbox" checked={localProps.isOpen!==false} onChange={e => updateAndCommit('isOpen', e.target.checked)} /></div>
+        {renderColor('MASK COLOR','bgColor','rgba(0,0,0,0.7)')}
+        {renderColor('MODAL BG','modalBg','')}
+        {renderColor('BORDER COLOR','borderColor','')}
       </>);
       default: return <div style={{ color: 'var(--text-dim)' }}>[ Properties not available ]</div>;
     }

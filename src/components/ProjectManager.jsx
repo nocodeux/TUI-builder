@@ -54,9 +54,6 @@ function ProjectManager({ currentProject, onLoadProject, onNewProject }) {
           </div>
         ))}
         
-        <div style={{ marginTop: 16, textAlign: 'center' }}>
-          <button onClick={() => onLoadProject(currentProject)} className="retro-button">Cerrar</button>
-        </div>
       </div>
     </div>
   );

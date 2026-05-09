@@ -1,12 +1,7 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { useDrop } from 'react-dnd';
+import { DataContext } from './DataRepeater';
 
-/**
- * Window.jsx — CORREGIDO
- *
- * Igual que Frame: retorna { handled: true }, verifica didDrop() para
- * evitar procesamiento doble, y usa isOver({ shallow: true }).
- */
 function Window({
   title = 'Window1',
   width = 400,
@@ -21,16 +16,23 @@ function Window({
   id,
   showClose = false,
   closeNextScreenId = null,
-  onNavigate
+  onNavigate,
+  staggered = false,
+  dataSourceType = 'manual',
+  dataField = ''
 }) {
+  const data = useContext(DataContext);
+  
+  const resolvedTitle = (dataSourceType === 'database' && data && dataField)
+    ? String(data[dataField] ?? title)
+    : title;
+
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ['COMPONENT', 'EXISTING_COMPONENT'],
     drop: (item, monitor) => {
-      // Si ya fue manejado por un hijo (Frame anidado, etc), no hacer nada
       if (monitor.didDrop()) return;
 
       if (item.id === undefined) {
-        // Viene del Toolbox — agregar como hijo de este Window
         if (onAddChild) onAddChild(item.type);
       } else if (item.id && onMoveChild) {
         onMoveChild(item);
@@ -59,7 +61,7 @@ function Window({
           className="retro-window-title"
           style={{ color: textColor || 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}
         >
-          {title}
+          {resolvedTitle}
         </span>
         {showClose && (
           <button 

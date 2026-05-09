@@ -12,7 +12,6 @@ const componentes = [
   { type: 'RadioButton', label: 'RadioButton' },
   { type: 'ComboBox', label: 'ComboBox' },
   { type: 'ListBox', label: 'ListBox' },
-  { type: 'PictureBox', label: 'PictureBox' },
   { type: 'HScrollBar', label: 'ScrollH' },
   { type: 'VScrollBar', label: 'ScrollV' },
   { type: 'Timer', label: 'Timer' },
@@ -20,7 +19,12 @@ const componentes = [
   { type: 'Line', label: 'Line' },
   { type: 'Image', label: 'Image' },
   { type: 'Data', label: 'Data' },
-  { type: 'Table', label: 'Table' }
+  { type: 'Table', label: 'Table' },
+  { type: 'DataRepeater', label: 'Repeater' },
+  { type: 'Form', label: 'Form' },
+  { type: 'Loader', label: 'Loader' },
+  { type: 'Tabs', label: 'Tabs' },
+  { type: 'Overlay', label: 'Overlay' }
 ];
 
 function ToolboxItem({ type, label }) {

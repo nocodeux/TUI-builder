@@ -1,14 +1,7 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { useDrop } from 'react-dnd';
+import { DataContext } from './DataRepeater';
 
-/**
- * Frame.jsx — CORREGIDO
- *
- * El drop retorna { handled: true } (nombre consistente con el resto del sistema).
- * El `canDrop` verifica que no sea un drop que ya fue procesado.
- * Se usa `monitor.isOver({ shallow: true })` para que el highlight solo
- * aparezca cuando el cursor está directamente sobre el Frame, no sobre sus hijos.
- */
 function Frame({
   title = 'Frame1',
   width = 300,
@@ -23,8 +16,15 @@ function Frame({
   children,
   onAddChild,
   onMoveChild,
+  dataSourceType = 'manual',
+  dataField = '',
   id
 }) {
+  const data = useContext(DataContext);
+  
+  const resolvedTitle = (dataSourceType === 'database' && data && dataField)
+    ? String(data[dataField] ?? title)
+    : title;
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ['COMPONENT', 'EXISTING_COMPONENT'],
     drop: (item, monitor) => {
@@ -77,7 +77,7 @@ function Frame({
           color: textColor || 'var(--accent)',
           fontSize: fontSize ? `${fontSize}px` : 'inherit',
           textAlign: alignment
-        }}>{title}</legend>
+        }}>{resolvedTitle}</legend>
         <div
           className="retro-frame-content"
           style={{

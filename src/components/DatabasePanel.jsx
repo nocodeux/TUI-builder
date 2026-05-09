@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-function DatabasePanel({ database, setDatabase, onClose, triggerSave }) {
+function DatabasePanel({ database, setDatabase, onClose }) {
   const [activeTab, setActiveTab] = useState('tables');
   const [newTableName, setNewTableName] = useState('');
   const [newField, setNewField] = useState({ name: '', type: 'TEXT' });
@@ -26,7 +26,6 @@ function DatabasePanel({ database, setDatabase, onClose, triggerSave }) {
       data: { ...tableData, [table.name]: [] }
     };
     setDatabase(newDb);
-    if (triggerSave) triggerSave(newDb);
     setNewTableName('');
   };
 
@@ -41,7 +40,6 @@ function DatabasePanel({ database, setDatabase, onClose, triggerSave }) {
       )
     };
     setDatabase(newDb);
-    if (triggerSave) triggerSave(newDb);
     setNewField({ name: '', type: 'TEXT' });
   };
 
@@ -49,10 +47,29 @@ function DatabasePanel({ database, setDatabase, onClose, triggerSave }) {
     if (!editingTable) return;
     const table = tables.find(t => t.name === editingTable);
     if (!table) return;
+
+    // VALIDATION
     const row = { id: Date.now() };
-    table.fields.filter(f => !f.primary).forEach(f => {
-      row[f.name] = newRowData[f.name] || '';
-    });
+    for (const f of table.fields) {
+      if (f.primary) continue;
+      let val = newRowData[f.name];
+      
+      // Basic validation by type
+      if (['INTEGER', 'REAL', 'DECIMAL'].includes(f.type)) {
+        const num = parseFloat(val);
+        if (val !== undefined && val !== '' && isNaN(num)) {
+          alert(`Invalid value for ${f.name}. Expected a number.`);
+          return;
+        }
+        val = isNaN(num) ? 0 : num;
+      }
+      if (f.type === 'BOOLEAN') {
+        val = val === true || val === 'true';
+      }
+      
+      row[f.name] = val || (['INTEGER', 'REAL', 'DECIMAL'].includes(f.type) ? 0 : '');
+    }
+
     const newDb = {
       ...database,
       data: {
@@ -61,7 +78,6 @@ function DatabasePanel({ database, setDatabase, onClose, triggerSave }) {
       }
     };
     setDatabase(newDb);
-    if (triggerSave) triggerSave(newDb);
     setNewRowData({});
   };
 
@@ -75,18 +91,67 @@ function DatabasePanel({ database, setDatabase, onClose, triggerSave }) {
       }
     };
     setDatabase(newDb);
-    if (triggerSave) triggerSave(newDb);
   };
 
   const deleteTable = (tableName) => {
+    if (!confirm(`Delete table "${tableName}"? This will delete all its data.`)) return;
     const newDb = {
       ...database,
       tables: database.tables.filter(t => t.name !== tableName),
       data: Object.fromEntries(Object.entries(database.data).filter(([k]) => k !== tableName))
     };
     setDatabase(newDb);
-    if (triggerSave) triggerSave(newDb);
     if (editingTable === tableName) setEditingTable(null);
+  };
+
+  const renameTable = (oldName, newName) => {
+    if (!newName.trim() || oldName === newName) return;
+    const cleanNewName = newName.trim();
+    if (tables.some(t => t.name === cleanNewName)) return alert('Table name already exists');
+
+    const newDb = {
+      ...database,
+      tables: database.tables.map(t => t.name === oldName ? { ...t, name: cleanNewName } : t),
+      data: Object.fromEntries(Object.entries(database.data).map(([k, v]) => [k === oldName ? cleanNewName : k, v]))
+    };
+    setDatabase(newDb);
+    setEditingTable(cleanNewName);
+  };
+
+  const deleteField = (fieldName) => {
+    if (fieldName === 'id') return;
+    if (!confirm(`Delete field "${fieldName}"? Data for this field will be lost.`)) return;
+    const newDb = {
+      ...database,
+      tables: database.tables.map(t =>
+        t.name === editingTable
+          ? { ...t, fields: t.fields.filter(f => f.name !== fieldName) }
+          : t
+      ),
+      // Optional: clean up data too
+      data: {
+        ...database.data,
+        [editingTable]: (database.data[editingTable] || []).map(row => {
+          const { [fieldName]: _, ...rest } = row;
+          return rest;
+        })
+      }
+    };
+    setDatabase(newDb);
+  };
+
+  const updateRow = (rowId, fieldName, value) => {
+    if (!editingTable) return;
+    const newDb = {
+      ...database,
+      data: {
+        ...database.data,
+        [editingTable]: (database.data[editingTable] || []).map(r => 
+          r.id === rowId ? { ...r, [fieldName]: value } : r
+        )
+      }
+    };
+    setDatabase(newDb);
   };
 
   const executeQuery = () => {
@@ -159,14 +224,26 @@ function DatabasePanel({ database, setDatabase, onClose, triggerSave }) {
             )}
             {tables.map(table => (
               <div key={table.name} className={`db-table-item ${editingTable === table.name ? 'selected' : ''}`}>
-                <div onClick={() => setEditingTable(table.name)} style={{ cursor: 'pointer', flex: 1 }}>
-                  <div style={{ color: 'var(--text)', fontWeight: 'bold' }}>{table.name}</div>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  {editingTable === table.name ? (
+                    <input 
+                      type="text" 
+                      defaultValue={table.name} 
+                      className="db-input" 
+                      style={{ height: 20, fontSize: 11, marginBottom: 2 }}
+                      onBlur={(e) => renameTable(table.name, e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && renameTable(table.name, e.target.value)}
+                    />
+                  ) : (
+                    <div onClick={() => setEditingTable(table.name)} style={{ cursor: 'pointer', color: 'var(--text)', fontWeight: 'bold' }}>{table.name}</div>
+                  )}
                   <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>
                     {table.fields.map(f => f.name).join(', ')} | {(tableData[table.name] || []).length} rows
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 4 }}>
-                  <button className="small-btn" onClick={() => exportTableData(table.name)}>Export</button>
+                  <button className="small-btn" onClick={() => { setEditingTable(table.name); setActiveTab('data'); }}>Data</button>
+                  <button className="small-btn" onClick={() => exportTableData(table.name)}>Exp</button>
                   <button className="small-btn danger" onClick={() => deleteTable(table.name)}>X</button>
                 </div>
               </div>
@@ -178,33 +255,75 @@ function DatabasePanel({ database, setDatabase, onClose, triggerSave }) {
                 <h3 style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 8 }}>FIELDS: {currentTable.name}</h3>
                 <div style={{ marginBottom: 8 }}>
                   {currentTable.fields.map(f => (
-                    <div key={f.name} style={{ padding: '2px 0', fontSize: 11 }}>
-                      {f.primary && <span style={{ color: 'var(--accent)' }}>[PK] </span>}
-                      <span style={{ color: 'var(--text)' }}>{f.name}</span>
-                      <span style={{ color: 'var(--text-dim)', marginLeft: 8 }}>({f.type})</span>
+                    <div key={f.name} style={{ padding: '2px 0', fontSize: 11, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        {f.primary && <span style={{ color: 'var(--accent)' }}>[PK] </span>}
+                        <span style={{ color: 'var(--text)' }}>{f.name}</span>
+                        <span style={{ color: 'var(--text-dim)', marginLeft: 8 }}>({f.type})</span>
+                      </div>
+                      {!f.primary && (
+                        <button 
+                          className="small-btn danger" 
+                          style={{ padding: '0 4px', fontSize: 9 }}
+                          onClick={() => deleteField(f.name)}
+                        >del</button>
+                      )}
                     </div>
                   ))}
                 </div>
-                <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-                  <input
-                    type="text"
-                    placeholder="Field name"
-                    value={newField.name}
-                    onChange={(e) => setNewField({ ...newField, name: e.target.value })}
-                    className="db-input"
-                    style={{ flex: 1 }}
-                  />
-                  <select
-                    value={newField.type}
-                    onChange={(e) => setNewField({ ...newField, type: e.target.value })}
-                    className="db-input"
-                  >
-                    <option value="TEXT">TEXT</option>
-                    <option value="INTEGER">INTEGER</option>
-                    <option value="REAL">REAL</option>
-                    <option value="BOOLEAN">BOOLEAN</option>
-                  </select>
-                  <button className="db-btn" onClick={addField}>+</button>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-end', background: 'rgba(255,255,0,0.05)', padding: 8, borderRadius: 4, border: '1px solid rgba(255,255,0,0.2)' }}>
+                  <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <label style={{ fontSize: 9, color: 'var(--accent)' }}>FIELD NAME</label>
+                    <input
+                      type="text"
+                      placeholder={
+                        newField.type === 'VARCHAR' || newField.type === 'TEXT' || newField.type === 'CHAR' ? 'e.g. Product_Description' :
+                        newField.type === 'INTEGER' ? 'e.g. Quantity' :
+                        newField.type === 'DECIMAL' || newField.type === 'REAL' ? 'e.g. Unit_Price' :
+                        newField.type === 'DATE' ? 'e.g. Created_At' :
+                        newField.type === 'TIME' ? 'e.g. Opening_Hour' :
+                        newField.type === 'DATETIME' ? 'e.g. Last_Login' :
+                        newField.type === 'BOOLEAN' ? 'e.g. Is_Published' :
+                        newField.type === 'BLOB' ? 'e.g. User_Avatar' : 'Field name'
+                      }
+                      value={newField.name}
+                      onChange={(e) => setNewField({ ...newField, name: e.target.value })}
+                      className="db-input"
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <label style={{ fontSize: 9, color: 'var(--accent)' }}>TYPE</label>
+                    <select
+                      value={newField.type}
+                      onChange={(e) => setNewField({ ...newField, type: e.target.value })}
+                      className="db-input"
+                      style={{ width: '100%' }}
+                    >
+                      <optgroup label="String Types">
+                        <option value="TEXT">TEXT</option>
+                        <option value="VARCHAR">VARCHAR</option>
+                        <option value="CHAR">CHAR</option>
+                      </optgroup>
+                      <optgroup label="Numeric Types">
+                        <option value="INTEGER">INTEGER</option>
+                        <option value="DECIMAL">DECIMAL (Money)</option>
+                        <option value="REAL">REAL (Float)</option>
+                      </optgroup>
+                      <optgroup label="Logic">
+                        <option value="BOOLEAN">BOOLEAN</option>
+                      </optgroup>
+                      <optgroup label="Date & Time">
+                        <option value="DATE">DATE</option>
+                        <option value="TIME">TIME</option>
+                        <option value="DATETIME">DATETIME</option>
+                      </optgroup>
+                      <optgroup label="Binary">
+                        <option value="BLOB">BLOB (File/Image)</option>
+                      </optgroup>
+                    </select>
+                  </div>
+                  <button className="db-btn" onClick={addField} style={{ height: 28 }}>ADD FIELD</button>
                 </div>
               </>
             )}
@@ -219,10 +338,16 @@ function DatabasePanel({ database, setDatabase, onClose, triggerSave }) {
                 <div key={field.name} style={{ marginBottom: 4 }}>
                   <label style={{ fontSize: 10, color: 'var(--text-dim)', display: 'block' }}>{field.name} ({field.type})</label>
                   <input
-                    type={field.type === 'INTEGER' ? 'number' : field.type === 'BOOLEAN' ? 'checkbox' : 'text'}
+                    type={
+                      ['INTEGER', 'REAL', 'DECIMAL'].includes(field.type) ? 'number' : 
+                      ['DATE'].includes(field.type) ? 'date' :
+                      ['TIME'].includes(field.type) ? 'time' :
+                      ['DATETIME'].includes(field.type) ? 'datetime-local' :
+                      field.type === 'BOOLEAN' ? 'checkbox' : 'text'
+                    }
                     className="db-input"
                     value={newRowData[field.name] || ''}
-                    onChange={(e) => setNewRowData({ ...newRowData, [field.name]: e.target.value })}
+                    onChange={(e) => setNewRowData({ ...newRowData, [field.name]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })}
                   />
                 </div>
               ))}
@@ -249,10 +374,29 @@ function DatabasePanel({ database, setDatabase, onClose, triggerSave }) {
                     {currentTableData.map(row => (
                       <tr key={row.id}>
                         {currentTable.fields.map(f => (
-                          <td key={f.name} style={{ fontSize: 10 }}>{String(row[f.name] ?? '')}</td>
+                          <td key={f.name} style={{ fontSize: 10, padding: 0 }}>
+                            {f.primary ? (
+                              <span style={{ padding: '2px 4px' }}>{row[f.name]}</span>
+                            ) : (
+                              <input 
+                                type="text"
+                                className="db-table-cell-input"
+                                value={String(row[f.name] ?? '')}
+                                onChange={(e) => updateRow(row.id, f.name, e.target.value)}
+                                style={{ 
+                                  width: '100%', 
+                                  background: 'transparent', 
+                                  border: 'none', 
+                                  color: 'var(--text)', 
+                                  fontSize: 10,
+                                  padding: '4px'
+                                }}
+                              />
+                            )}
+                          </td>
                         ))}
-                        <td>
-                          <button className="small-btn danger" onClick={() => deleteRow(row.id)}>X</button>
+                        <td style={{ textAlign: 'center' }}>
+                          <button className="small-btn danger" style={{ padding: '0 4px' }} onClick={() => deleteRow(row.id)}>X</button>
                         </td>
                       </tr>
                     ))}
@@ -331,9 +475,6 @@ function DatabasePanel({ database, setDatabase, onClose, triggerSave }) {
           </div>
         )}
 
-        <div style={{ marginTop: 12, textAlign: 'center' }}>
-          <button className="db-btn" onClick={onClose}>Close</button>
-        </div>
       </div>
     </div>
   );

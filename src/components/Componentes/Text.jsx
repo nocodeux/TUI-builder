@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useContext } from 'react';
+import { DataContext } from './DataRepeater';
 
 const getThemeColor = (val, themeVar) => {
   if (!val || val.toLowerCase() === '#00ff00' || val.toLowerCase() === '#000000' || val === 'transparent') return `var(${themeVar})`;
@@ -9,8 +10,39 @@ const getThemeColor = (val, themeVar) => {
  * Text.jsx
  * Soporta etiquetas básicas: [b], [i], [u], [s], [sup], [sub]
  */
-function Text({ text = 'Text1', textColor = '', fontSize = 12, alignment = 'left', linkUrl = '', width = 'auto', sizing = {} }) {
+function Text({ 
+  text = 'Text1', 
+  textColor = '', 
+  fontSize = 12, 
+  alignment = 'left', 
+  linkUrl = '', 
+  action = 'none', 
+  width = 'auto', 
+  sizing = {},
+  dataSourceType = 'manual',
+  dataField = '',
+  requireLogin = false
+}) {
+  const data = useContext(DataContext);
+  // Temporary: In a real app we would check a global AuthContext here
+  const isAuthenticated = false; 
   
+  const resolveTemplates = (txt, dataSource) => {
+    if (!txt || !dataSource) return txt;
+    return txt.replace(/\{\{(.*?)\}\}/g, (match, field) => {
+      const trimmedField = field.trim();
+      return dataSource[trimmedField] !== undefined ? String(dataSource[trimmedField]) : match;
+    });
+  };
+
+  let resolvedText = (dataSourceType === 'database' && data)
+    ? (dataField ? String(data[dataField] ?? '') : resolveTemplates(text, data))
+    : text;
+
+  if (dataSourceType === 'database' && requireLogin && !isAuthenticated) {
+    resolvedText = '[ Private Content Needs Login ]';
+  }
+
   // Función para convertir etiquetas personalizadas a HTML seguro (compatible con multilínea)
   const formatText = (txt) => {
     if (!txt) return '';
@@ -24,6 +56,8 @@ function Text({ text = 'Text1', textColor = '', fontSize = 12, alignment = 'left
     return formatted;
   };
 
+  const hasAction = action && action !== 'none';
+
   const style = {
     color: getThemeColor(textColor, '--text'),
     fontSize: `${fontSize}px`,
@@ -33,13 +67,14 @@ function Text({ text = 'Text1', textColor = '', fontSize = 12, alignment = 'left
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
     lineHeight: '1.4',
-    textDecoration: linkUrl ? 'underline' : 'none' // Subrayado automático si hay link
+    textDecoration: (linkUrl || hasAction) ? 'underline' : 'none', // Subrayado automático si hay link o acción
+    cursor: hasAction ? 'pointer' : 'inherit'
   };
 
   const content = (
     <span 
       style={style} 
-      dangerouslySetInnerHTML={{ __html: formatText(text) }}
+      dangerouslySetInnerHTML={{ __html: formatText(resolvedText) }}
     />
   );
 
