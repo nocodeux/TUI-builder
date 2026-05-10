@@ -1,5 +1,7 @@
 # TUI Builder
 
+![TUI Builder Preview](./public/images/tui-builder-preview.png)
+
 A text-first interface builder for the browser.
 
 No panels. No shadows. No visual noise.  
