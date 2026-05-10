@@ -45,7 +45,7 @@ const CONTAINER_TYPES = ['Window', 'Frame', 'Row', 'Tabs', 'DataRepeater', 'Form
 
 // ─── Draggable component with position-aware drop detection ─────────────────
 function DraggableComponent({
-  comp, rowId, topRowId, index, totalSiblings, selectedId, onSelect, onDelete, onDuplicate,
+  comp, rowId, topRowId, index, totalSiblings, selectedIds, onSelect, onDelete, onDuplicate,
   onAddComponent, activeWindow, onMoveComponent, rowDirection, onNavigate, onUpdateComponent, database, onSaveRecord
 }) {
   const currentTopRowId = topRowId || rowId;
@@ -121,7 +121,7 @@ function DraggableComponent({
         if (item.id === undefined) {
           onAddComponent(item.type, topRowId, 0, comp.id);
         } else {
-          onMoveComponent(item, topRowId, 0, comp.id);
+          onMoveComponent(item, topRowId, 0, null, comp.id);
         }
       } else {
         const insertIndex = dropIndicator === 'before' ? index : index + 1;
@@ -157,18 +157,23 @@ function DraggableComponent({
   if (comp.type === 'Window' && activeWindow && comp.id !== activeWindow) {
     return (
       <div
-        ref={combinedRef}
-        className="component-wrapper window-hidden"
-        style={{ opacity: 0.35, cursor: 'grab' }}
-        title={comp.props.title}
-        onClick={e => { e.stopPropagation(); onSelect(comp.id); }}
-      >
+      ref={combinedRef}
+      className={`component-wrapper ${selectedIds && selectedIds.includes(comp.id) ? 'selected' : ''}`}
+      style={{
+        opacity: 0.35,
+        cursor: 'grab'
+      }}
+      title={comp.props.title}
+      onClick={e => { e.stopPropagation(); onSelect(comp.id); }}
+    >
         <Component {...comp.props} id={comp.id} />
       </div>
     );
   }
 
   const isContainer = CONTAINER_TYPES.includes(comp.type);
+  const isSelected = selectedIds && selectedIds.includes(comp.id);
+  const isHidden = comp.type === 'Window' && activeWindow && comp.id !== activeWindow;
   
   // Always hide Overlay from the row flow. 
   // It's rendered at the top level when open, 
@@ -180,11 +185,6 @@ function DraggableComponent({
   const childCount = comp.children?.length || 0;
   const isHorizontal = rowDirection === 'row';
 
-  const handleKeyDown = e => {
-    if (e.key === 'Delete') { e.preventDefault(); onDelete(comp.id); }
-    if ((e.key === 'd' && (e.ctrlKey || e.metaKey))) { e.preventDefault(); onDuplicate(comp.id); }
-  };
-
   // Render children of containers (Window/Frame/Row/PictureBox)
   const renderContainerChildren = () => {
     return (comp.children || []).map((child, ci) => (
@@ -195,7 +195,7 @@ function DraggableComponent({
           topRowId={currentTopRowId}
           index={ci}
           totalSiblings={(comp.children || []).length}
-          selectedId={selectedId}
+          selectedIds={selectedIds}
           onSelect={onSelect}
           onDelete={onDelete}
           onDuplicate={onDuplicate}
@@ -256,7 +256,7 @@ function DraggableComponent({
   return (
     <div
       ref={combinedRef}
-      className={`component-wrapper ${selectedId === comp.id ? 'selected' : ''}`}
+      className={`component-wrapper ${isSelected ? 'selected' : ''}`}
       style={{
         position: 'relative',
         opacity: isDragging ? 0.3 : 1,
@@ -265,18 +265,48 @@ function DraggableComponent({
         transition: 'padding 0.15s ease-out', // Smooth transition for the gap
         ...sizingStyle,
         ...wrapperPadding,
+        outline: isSelected ? '1px dashed #ffff00' : 'none',
+        outlineOffset: '2px',
+        zIndex: isSelected ? 10 : 1,
       }}
       onClick={e => { 
         e.stopPropagation(); 
         if ((e.ctrlKey || e.metaKey) && onNavigate) {
             onNavigate(comp);
         } else {
-            onSelect(comp.id); 
+            onSelect(comp.id, e.shiftKey); 
         }
       }}
-      onKeyDown={handleKeyDown}
-      tabIndex={0}
     >
+      {/* Floating delete button for selected component */}
+      {isSelected && (
+        <button 
+          onClick={(e) => { e.stopPropagation(); onDelete(comp.id); }}
+          style={{
+            position: 'absolute',
+            top: -10,
+            right: -10,
+            width: 20,
+            height: 20,
+            borderRadius: '0',
+            background: '#330000',
+            border: '1px solid #ff0000',
+            color: '#ff6666',
+            fontSize: '10px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+            boxShadow: '0 0 5px rgba(255,0,0,0.5)',
+            fontFamily: 'monospace'
+          }}
+          title="Delete"
+        >
+          X
+        </button>
+      )}
+
       {/* Indicator line positioned in the gap area */}
       {isOver && dropIndicator && (
         <div
@@ -306,7 +336,7 @@ function DraggableComponent({
       <Component
         {...comp.props}
         id={comp.id}
-        selected={selectedId === comp.id}
+        selected={selectedIds && selectedIds.includes(comp.id)}
         // Pass override sizing to the component
         width={isWidthFill ? '100%' : (isWidthHug ? 'auto' : (comp.props.width || 'auto'))}
         height={isHeightFill ? '100%' : (isHeightHug ? 'auto' : (comp.props.height || 'auto'))}
@@ -317,7 +347,7 @@ function DraggableComponent({
               ? database.data[comp.props.dataSource] 
               : comp.props.rows}
         onAddChild={isContainer ? (type, extra) => onAddComponent(type, currentTopRowId, childCount, comp.id, extra) : undefined}
-        onMoveChild={isContainer ? item => onMoveComponent(item, currentTopRowId, childCount, comp.id) : undefined}
+        onMoveChild={isContainer ? item => onMoveComponent(item, currentTopRowId, childCount, null, comp.id) : undefined}
         onNavigate={onNavigate}
         onUpdate={(props) => onUpdateComponent(comp.id, props)}
         onSaveRecord={onSaveRecord}
@@ -332,7 +362,7 @@ function DraggableComponent({
 
 // ─── Row of layout (with position-aware drop on empty area) ─────────────────
 function LayoutRow({
-  row, rowIndex, selectedId, onSelect, onDelete, onDuplicate,
+  row, rowIndex, selectedIds, onSelect, onDelete, onDuplicate,
   onAddComponent, activeWindow, onMoveComponent, onDropToRow, onSelectRow, onNavigate, onUpdateComponent, database, onSaveRecord
 }) {
   const layout = row.layout || { direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false };
@@ -391,7 +421,7 @@ function LayoutRow({
     collect: monitor => ({ isOver: !!monitor.isOver({ shallow: true }) })
   }), [row.id, row.children.length, layout.direction, onDropToRow, onMoveComponent]);
 
-  const isRowSelected = selectedId === row.id;
+  const isRowSelected = selectedIds && selectedIds.includes(row.id);
 
   // Padding from layout
   const padding = {
@@ -417,6 +447,8 @@ function LayoutRow({
         alignItems: layout.align,
         justifyContent: layout.justify,
         flexWrap: layout.wrap ? 'wrap' : 'nowrap',
+        width: row.props?.sizing?.widthMode === 'hug' ? 'fit-content' : '100%',
+        height: row.props?.sizing?.heightMode === 'hug' ? 'auto' : (row.props?.sizing?.heightMode === 'fill' ? '100%' : 'auto'),
         minHeight: 32,
         ...padding,
         border: isRowSelected ? '1px dashed var(--accent)' : '1px dashed transparent',
@@ -426,7 +458,7 @@ function LayoutRow({
         transition: 'border-color 0.15s, background 0.15s',
         cursor: 'default',
       }}
-      onClick={e => { e.stopPropagation(); onSelectRow(row.id); }}
+      onClick={e => { e.stopPropagation(); onSelectRow(row.id, e.shiftKey); }}
     >
       {/* Row label */}
       {isRowSelected && (
@@ -447,7 +479,7 @@ function LayoutRow({
           rowId={row.id}
           index={ci}
           totalSiblings={row.children.length}
-          selectedId={selectedId}
+          selectedIds={selectedIds}
           onSelect={onSelect}
           onDelete={onDelete}
           onDuplicate={onDuplicate}
@@ -515,7 +547,7 @@ function NewRowDropZone({ onDropNewRow, afterIndex }) {
 
 // ─── Main Canvas ────────────────────────────────────────────────────────────
 function Canvas({
-  rows, selectedId, onSelect, onDelete, onDuplicate, viewMode, onAddToRow, onAddNewRow,
+  rows, selectedIds, onSelect, onDelete, onDuplicate, viewMode, onAddToRow, onAddNewRow,
   onMoveComponent, onSelectRow, activeWindow, canvasPadding, database, onNavigate, onUpdateComponent, onSaveRecord
 }) {
   // Drop on empty canvas → new row
@@ -560,7 +592,7 @@ function Canvas({
           </div>
         )}
 
-        {rows.filter(r => r.children.some(c => c.type !== 'Overlay')).map((row, ri) => (
+        {rows.map((row, ri) => (
           <React.Fragment key={row.id}>
             {/* Between-row drop zone (before first row) */}
             {ri === 0 && (
@@ -576,7 +608,7 @@ function Canvas({
             <LayoutRow
                 row={row}
                 rowIndex={ri}
-                selectedId={selectedId}
+                selectedIds={selectedIds}
                 onSelect={onSelect}
                 onDelete={onDelete}
                 onDuplicate={onDuplicate}
@@ -623,18 +655,18 @@ function Canvas({
               }).map(ov => (
                 <div 
                   key={ov.id} 
-                  onClick={(e) => { e.stopPropagation(); onSelect(ov.id); }}
+                  onClick={(e) => { e.stopPropagation(); onSelect(ov.id, e.shiftKey); }}
                   style={{ 
                     padding: '6px 12px', 
-                    border: selectedId === ov.id ? '2px solid var(--accent)' : '1px solid var(--border)',
-                    background: selectedId === ov.id ? 'var(--selected)' : 'rgba(0,0,0,0.4)',
+                    border: selectedIds && selectedIds.includes(ov.id) ? '2px solid var(--accent)' : '1px solid var(--border)',
+                    background: selectedIds && selectedIds.includes(ov.id) ? 'var(--selected)' : 'rgba(0,0,0,0.4)',
                     fontSize: 11,
                     cursor: 'pointer',
                     fontFamily: 'monospace',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 8,
-                    boxShadow: selectedId === ov.id ? '0 0 15px var(--accent)' : 'none',
+                    boxShadow: selectedIds && selectedIds.includes(ov.id) ? '0 0 15px var(--accent)' : 'none',
                     transition: 'all 0.2s'
                   }}
                 >
@@ -678,7 +710,7 @@ function Canvas({
                   topRowId={ov.rowId}
                   index={ci}
                   totalSiblings={ov.children.length}
-                  selectedId={selectedId}
+                  selectedIds={selectedIds}
                   onSelect={onSelect}
                   onDelete={onDelete}
                   onDuplicate={onDuplicate}

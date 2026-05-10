@@ -147,9 +147,10 @@ function AutoLayoutPanel({ layout = {}, onUpdate }) {
 function Inspector({ 
   component, isRow, onUpdate, onDelete, onDuplicate, 
   windows, database, canvasPadding, onCanvasPaddingChange, 
-  selectedId, themeColors = {}, activeScreen, screens, onUpdateScreen,
+  selectedIds = [], themeColors = {}, activeScreen, screens, onUpdateScreen,
   overlays = []
 }) {
+  const selectedId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [localProps, setLocalProps] = useState({});
   const [tabsText, setTabsText] = useState('');
@@ -168,8 +169,10 @@ function Inspector({
   }, [component?.id, component?.props]);
 
   const commitChange = useCallback((field, value) => {
-    if (component) onUpdate(component.id, { [field]: value });
-  }, [component, onUpdate]);
+    if (selectedIds && selectedIds.length > 0) {
+      selectedIds.forEach(id => onUpdate(id, { [field]: value }));
+    }
+  }, [selectedIds, onUpdate]);
 
   if (!component) {
     return (
@@ -383,7 +386,7 @@ function Inspector({
     );
   };
 
-  const showLayoutPanel = ['Window', 'Frame', 'Row', 'DataRepeater'].includes(component.type);
+  const showLayoutPanel = ['Window', 'Frame', 'Row', 'DataRepeater', 'Tabs', 'Form'].includes(component.type);
 
   const renderNumber = (field, label, placeholder = '', onAfterCommit) => (
     <div className="property-group">
@@ -717,45 +720,8 @@ function Inspector({
       case 'TextBox': return (<>
         <div className="property-group"><label>LABEL</label><input type="text" value={localProps.label||''} onChange={e => updateAndCommit('label', e.target.value)} placeholder="e.g. USERNAME" /></div>
         <div className="property-group"><label>PLACEHOLDER</label><input type="text" value={localProps.placeholder||''} onChange={e => updateAndCommit('placeholder', e.target.value)} /></div>
-        
-        {(() => {
-          // Find the parent table context (Form or DataRepeater)
-          // We look for the closest ancestor that has a table defined.
-          const findTableContext = (id) => {
-            const findInRows = (items, parentTable = null) => {
-              for (const item of items) {
-                let currentTable = parentTable;
-                if (item.type === 'Form') currentTable = item.props.targetTable;
-                if (item.type === 'DataRepeater') currentTable = item.props.tableName;
-                
-                if (item.id === id) return currentTable;
-                if (item.children) {
-                  const result = findInRows(item.children, currentTable);
-                  if (result) return result;
-                }
-              }
-              return null;
-            };
-            return findInRows(activeScreen?.rows || []);
-          };
-
-          const contextTable = findTableContext(component.id);
-          const fields = contextTable ? ((database?.tables || []).find(t => t.name === contextTable)?.fields || []) : [];
-
-          return (
-            <div className="property-group">
-              <label>MAPPING FIELD</label>
-              {fields.length > 0 ? (
-                <select value={localProps.dataField || ''} onChange={e => updateAndCommit('dataField', e.target.value)}>
-                  <option value="">-- Select Field --</option>
-                  {fields.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
-                </select>
-              ) : (
-                <input type="text" value={localProps.dataField || ''} onChange={e => updateAndCommit('dataField', e.target.value)} placeholder="e.g. email" />
-              )}
-            </div>
-          );
-        })()}
+        {renderDataBinding()}
+        <div className="property-divider" />
         {renderNumber('width','WIDTH (px)','150')}
         <div className="property-group"><label>INPUT TYPE</label>
           <select value={localProps.inputType||'text'} onChange={e => updateAndCommit('inputType', e.target.value)}>
@@ -781,13 +747,15 @@ function Inspector({
       </>);
       case 'CheckBox': return (<>
         <div className="property-group"><label>TEXT</label><input type="text" value={localProps.text||''} onChange={e => updateAndCommit('text', e.target.value)} /></div>
-        <div className="property-group"><label>CHECKED</label><input type="checkbox" checked={localProps.checked||false} onChange={e => updateAndCommit('checked', e.target.checked)} /></div>
+        {renderDataBinding()}
+        <div className="property-group"><label>CHECKED (Static)</label><input type="checkbox" checked={localProps.checked||false} onChange={e => updateAndCommit('checked', e.target.checked)} /></div>
         {renderColor('TEXT COLOR','textColor','#00ff00')}
       </>);
       case 'RadioButton': return (<>
         <div className="property-group"><label>TEXT</label><input type="text" value={localProps.text||''} onChange={e => updateAndCommit('text', e.target.value)} /></div>
         <div className="property-group"><label>GROUP</label><input type="text" value={localProps.group||'group1'} onChange={e => updateAndCommit('group', e.target.value)} /></div>
-        <div className="property-group"><label>CHECKED</label><input type="checkbox" checked={localProps.checked||false} onChange={e => updateAndCommit('checked', e.target.checked)} /></div>
+        {renderDataBinding()}
+        <div className="property-group"><label>CHECKED (Static)</label><input type="checkbox" checked={localProps.checked||false} onChange={e => updateAndCommit('checked', e.target.checked)} /></div>
         {renderColor('TEXT COLOR','textColor','#00ff00')}
       </>);
       case 'Shape': return (<>
@@ -925,6 +893,23 @@ function Inspector({
             </select>
           </div>
         )}
+        {localProps.optionTable && (
+          <>
+            <div className="property-group">
+              <label>FILTER BY FIELD</label>
+              <select value={localProps.optionFilterField||''} onChange={e => updateAndCommit('optionFilterField', e.target.value)}>
+                <option value="">-- No Filter --</option>
+                {((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+              </select>
+            </div>
+            {localProps.optionFilterField && (
+              <div className="property-group">
+                <label>FILTER VALUE</label>
+                <input type="text" value={localProps.optionFilterValue||''} onChange={e => updateAndCommit('optionFilterValue', e.target.value)} placeholder="e.g. active or {{id}}" />
+              </div>
+            )}
+          </>
+        )}
         <div className="property-divider" />
         {renderDataBinding()}
         <div className="property-divider" />
@@ -951,6 +936,23 @@ function Inspector({
               {((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
             </select>
           </div>
+        )}
+        {localProps.optionTable && (
+          <>
+            <div className="property-group">
+              <label>FILTER BY FIELD</label>
+              <select value={localProps.optionFilterField||''} onChange={e => updateAndCommit('optionFilterField', e.target.value)}>
+                <option value="">-- No Filter --</option>
+                {((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+              </select>
+            </div>
+            {localProps.optionFilterField && (
+              <div className="property-group">
+                <label>FILTER VALUE</label>
+                <input type="text" value={localProps.optionFilterValue||''} onChange={e => updateAndCommit('optionFilterValue', e.target.value)} placeholder="e.g. active or {{id}}" />
+              </div>
+            )}
+          </>
         )}
         <div className="property-divider" />
         {renderDataBinding()}

@@ -35,35 +35,15 @@ function DataRepeater({
     position: 'relative'
   };
 
-  if (!tableName) {
-    return (
-      <div style={style}>
-        <div style={{ color: 'var(--text-dim)', fontSize: 10, textAlign: 'center', width: '100%' }}>
-          [ Select a table in the Inspector ]
-        </div>
-      </div>
-    );
-  }
-
-  if (records.length === 0) {
-    return (
-      <div style={style}>
-        <div style={{ color: 'var(--text-dim)', fontSize: 10, textAlign: 'center', width: '100%' }}>
-          [ No records found in table: {tableName} ]
-        </div>
-      </div>
-    );
-  }
-
-  // In the editor, we only show 1 or 2 items as a preview to avoid cluttering the canvas
-  // But we render the children for EACH record in the "Data Context"
-  const previewRecords = records.slice(0, 3); // Preview first 3
+  // In the editor, we want to see the children even if there are no records yet.
+  // We'll use one empty record as a fallback for the template.
+  const previewRecords = records.length > 0 ? records.slice(0, 3) : [{}];
   const hasChildren = React.Children.count(children) > 0;
 
   return (
     <div style={style}>
-      <div style={{ position: 'absolute', top: -14, left: 4, fontSize: 8, color: 'var(--accent)', background: 'var(--bg)', padding: '0 4px', border: '1px solid var(--accent)', borderRadius: 2 }}>
-        REPEATER: {tableName} ({records.length} items)
+      <div style={{ position: 'absolute', top: -14, left: 4, fontSize: 8, color: 'var(--accent)', background: 'var(--bg)', padding: '0 4px', border: '1px solid var(--accent)', borderRadius: 2, zIndex: 10 }}>
+        REPEATER: {tableName || 'No Table'} ({records.length} items)
       </div>
       
       {!hasChildren && (
@@ -89,9 +69,12 @@ function DataRepeater({
             position: 'relative',
             background: 'rgba(0,255,0,0.02)',
             minHeight: 30,
-            width: '100%'
+            width: '100%',
+            marginBottom: index < previewRecords.length - 1 ? layout.gap || 8 : 0
           }}>
-            <div style={{ position: 'absolute', right: 2, top: 2, fontSize: 7, color: 'var(--text-dim)', opacity: 0.5 }}>#{index + 1}</div>
+            <div style={{ position: 'absolute', right: 2, top: 2, fontSize: 7, color: 'var(--text-dim)', opacity: 0.5 }}>
+              {records.length > 0 ? `#${index + 1}` : 'TEMPLATE'}
+            </div>
             {children}
           </div>
         </DataContext.Provider>
@@ -102,8 +85,15 @@ function DataRepeater({
           + {records.length - 3} more items hidden in editor
         </div>
       )}
+      
+      {!tableName && hasChildren && (
+        <div style={{ fontSize: 8, color: '#ff6666', textAlign: 'center', marginTop: 4 }}>
+          (No table selected - template only)
+        </div>
+      )}
     </div>
   );
 }
+
 
 export default DataRepeater;

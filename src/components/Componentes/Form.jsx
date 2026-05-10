@@ -13,13 +13,23 @@ function Form({
   layout = {},
   database = { data: {}, schema: [] }
 }) {
+  const parentData = useContext(DataContext);
   const [formData, setFormData] = useState({});
   const initialDataLoaded = useRef(false);
+
+  const resolveTemplates = (txt, dataSource) => {
+    if (!txt || !dataSource) return txt;
+    return txt.replace(/\{\{(.*?)\}\}/g, (match, field) => {
+      const trimmedField = field.trim();
+      return dataSource[trimmedField] !== undefined ? String(dataSource[trimmedField]) : match;
+    });
+  };
 
   useEffect(() => {
     if (sourceTable && filterField && filterValue && database?.data?.[sourceTable]) {
       const records = database.data[sourceTable];
-      const valStr = String(filterValue).trim();
+      const resolvedValue = resolveTemplates(filterValue, parentData);
+      const valStr = String(resolvedValue).trim();
       const record = records.find(r => String(r[filterField]) === valStr);
       
       if (record && !initialDataLoaded.current) {
@@ -27,7 +37,7 @@ function Form({
         initialDataLoaded.current = true;
       }
     }
-  }, [sourceTable, filterField, filterValue, database]);
+  }, [sourceTable, filterField, filterValue, database, parentData]);
 
   // Reset flag if source changes
   useEffect(() => {

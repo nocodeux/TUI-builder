@@ -39,7 +39,8 @@ function App() {
     { id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }
   ]);
   const [currentScreenId, setCurrentScreenId] = useState('screen-1');
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]); // Array of IDs
+  const [lastSelectedId, setLastSelectedId] = useState(null); // For shift-select ranges if needed later
   const [viewMode, setViewMode] = useState('desktop');
   const [theme, setTheme] = useState(() => localStorage.getItem('nanostudio_theme') || 'theme-nano');
   const [showUserJourney, setShowUserJourney] = useState(false);
@@ -65,6 +66,9 @@ function App() {
   const [editingProjectName, setEditingProjectName] = useState('');
   const [projectList, setProjectList] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
+  const [clipboard, setClipboard] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
 
   const isInitialLoading = useRef(true);
   const saveTimer = useRef(null);
@@ -130,61 +134,141 @@ function App() {
   const activeScreen = screens.find(s => s.id === currentScreenId) || screens[0];
   const rows = activeScreen.rows;
 
+  // ── History Management ───────────────────────────────────────────────────
+  const [isUndoing, setIsUndoing] = useState(false);
+
+  const saveHistory = useCallback((nextScreens) => {
+    if (isUndoing) return;
+    setHistory(prev => {
+      const nextHistory = prev.slice(0, historyIndex + 1);
+      nextHistory.push(JSON.parse(JSON.stringify(nextScreens)));
+      if (nextHistory.length > 50) nextHistory.shift();
+      return nextHistory;
+    });
+    setHistoryIndex(prev => {
+      const next = prev + 1;
+      return next > 49 ? 49 : next;
+    });
+  }, [historyIndex, isUndoing]);
+
+  const updateScreens = useCallback((newScreensOrFn, shouldSaveHistory = true) => {
+    setScreens(prev => {
+      const next = typeof newScreensOrFn === 'function' ? newScreensOrFn(prev) : newScreensOrFn;
+      if (shouldSaveHistory && !isInitialLoading.current) {
+        saveHistory(next);
+      }
+      return next;
+    });
+  }, [saveHistory]);
+
+  const undo = useCallback(() => {
+    if (historyIndex > 0) {
+      setIsUndoing(true);
+      const prevScreens = history[historyIndex - 1];
+      setScreens(JSON.parse(JSON.stringify(prevScreens)));
+      setHistoryIndex(historyIndex - 1);
+      setTimeout(() => setIsUndoing(false), 50);
+    }
+  }, [history, historyIndex]);
+
+  const redo = useCallback(() => {
+    if (historyIndex < history.length - 1) {
+      setIsUndoing(true);
+      const nextScreens = history[historyIndex + 1];
+      setScreens(JSON.parse(JSON.stringify(nextScreens)));
+      setHistoryIndex(historyIndex + 1);
+      setTimeout(() => setIsUndoing(false), 50);
+    }
+  }, [history, historyIndex]);
+
   // Wrapped setRows to update the active screen in the screens array
   const setRows = useCallback((newRowsOrFn) => {
-    setScreens(prev => prev.map(s => {
-      if (s.id === currentScreenId) {
-        const nextRows = typeof newRowsOrFn === 'function' ? newRowsOrFn(s.rows) : newRowsOrFn;
-        return { ...s, rows: nextRows };
-      }
-      return s;
-    }));
-  }, [currentScreenId]);
+    updateScreens(prev => {
+      return prev.map(s => {
+        if (s.id === currentScreenId) {
+          const nextRows = typeof newRowsOrFn === 'function' ? newRowsOrFn(s.rows) : newRowsOrFn;
+          return { ...s, rows: nextRows };
+        }
+        return s;
+      });
+    });
+  }, [currentScreenId, updateScreens]);
+
+  // Initial history snapshot
+  useEffect(() => {
+    if (!isInitialLoading.current && historyIndex === -1 && screens.length > 0) {
+       setHistory([screens]);
+       setHistoryIndex(0);
+    }
+  }, [screens, historyIndex]);
 
   const moveScreen = useCallback((dragIndex, hoverIndex) => {
-    setScreens(prev => {
+    updateScreens(prev => {
       const next = [...prev];
       const [dragged] = next.splice(dragIndex, 1);
       next.splice(hoverIndex, 0, dragged);
       return next;
     });
-  }, []);
+  }, [updateScreens]);
 
   const addScreen = useCallback(() => {
     const newScreen = { id: mkId(), name: `Screen ${screens.length + 1}`, rows: [], settings: { timeout: 0, nextScreenId: null } };
-    setScreens(prev => [...prev, newScreen]);
+    updateScreens(prev => [...prev, newScreen]);
     setCurrentScreenId(newScreen.id);
-  }, [screens.length]);
+  }, [screens.length, updateScreens]);
 
-  const deleteScreen = useCallback((id) => {
+  const deleteScreen = useCallback((screenId) => {
+    const screen = screens.find(s => s.id === screenId);
     if (screens.length <= 1) return;
-    const targetScreen = screens.find(s => s.id === id);
-    const hasContent = targetScreen && targetScreen.rows.some(r => r.children && r.children.length > 0);
+    const hasContent = screen && screen.rows.some(r => r.children && r.children.length > 0);
     if (hasContent) {
       setConfirmModal({
-        title: 'DELETE SCREEN',
-        message: `The screen "${targetScreen.name}" has elements. Are you sure you want to delete it?`,
+        title: 'Delete Screen',
+        message: `Are you sure you want to delete "${screen.name}"?`,
         confirmText: 'Delete screen',
         onConfirm: () => {
-          setScreens(prev => {
-            const next = prev.filter(s => s.id !== id);
-            if (currentScreenId === id) setCurrentScreenId(next[0].id);
+          updateScreens(prev => {
+            const next = prev.filter(s => s.id !== screenId);
+            if (currentScreenId === screenId && next.length > 0) {
+              setCurrentScreenId(next[0].id);
+            }
             return next;
           });
           setConfirmModal(null);
-        }
+        },
+        onCancel: () => setConfirmModal(null)
       });
       return;
     }
-    setScreens(prev => {
-      const next = prev.filter(s => s.id !== id);
-      if (currentScreenId === id) setCurrentScreenId(next[0].id);
+    updateScreens(prev => {
+      const next = prev.filter(s => s.id !== screenId);
+      if (currentScreenId === screenId && next.length > 0) {
+        setCurrentScreenId(next[0].id);
+      }
       return next;
     });
-  }, [screens, currentScreenId]);
+  }, [screens, currentScreenId, updateScreens]);
+
+  const duplicateScreen = useCallback((screen) => {
+    updateScreens(prev => {
+      const next = JSON.parse(JSON.stringify(screen));
+      next.id = mkId();
+      next.name = `${screen.name} (Copy)`;
+      return [...prev, next];
+    });
+  }, [updateScreens]);
+
+  const updateScreenSettings = useCallback((screenId, settings) => {
+    updateScreens(prev => prev.map(s => {
+      if (s.id === screenId) {
+        return { ...s, settings: { ...s.settings, ...settings } };
+      }
+      return s;
+    }));
+  }, [updateScreens]);
 
   const updateScreen = useCallback((id, updates) => {
-    setScreens(prev => prev.map(s => {
+    updateScreens(prev => prev.map(s => {
       if (s.id === id) {
         if (updates.settings) {
           return { ...s, settings: { ...(s.settings || {}), ...updates.settings } };
@@ -391,10 +475,11 @@ function App() {
     return { rows: rowsArr, moved: null, parentId: null, fromIndex: -1 };
   };
 
-  const insertIntoComps = (comps, targetId, movedComp, index) => {
+  const insertIntoComps = (comps, targetId, movedComp, index, parentId = null) => {
+    const finalTarget = parentId || targetId;
     for (let i = 0; i < comps.length; i += 1) {
       const comp = comps[i];
-      if (comp.id === targetId) {
+      if (comp.id === finalTarget) {
         const nextChildren = [...(comp.children || [])];
         const insertAt = Math.min(Math.max(index, 0), nextChildren.length);
         nextChildren.splice(insertAt, 0, movedComp);
@@ -404,7 +489,7 @@ function App() {
       }
 
       if (comp.children?.length) {
-        const nested = insertIntoComps(comp.children, targetId, movedComp, index);
+        const nested = insertIntoComps(comp.children, targetId, movedComp, index, parentId);
         if (nested.inserted) {
           const nextComps = [...comps];
           nextComps[i] = { ...comp, children: nested.comps };
@@ -412,14 +497,14 @@ function App() {
         }
       }
     }
-
     return { comps, inserted: false };
   };
 
-  const insertIntoRows = (rowsArr, targetId, movedComp, index) => {
+  const insertIntoRows = (rowsArr, targetId, movedComp, index, parentId = null) => {
+    const finalTarget = parentId || targetId;
     for (let i = 0; i < rowsArr.length; i += 1) {
       const row = rowsArr[i];
-      if (row.id === targetId) {
+      if (row.id === finalTarget) {
         const nextChildren = [...row.children];
         const insertAt = Math.min(Math.max(index, 0), nextChildren.length);
         nextChildren.splice(insertAt, 0, movedComp);
@@ -428,14 +513,13 @@ function App() {
         return { rows: nextRows, inserted: true };
       }
 
-      const nested = insertIntoComps(row.children, targetId, movedComp, index);
+      const nested = insertIntoComps(row.children, targetId, movedComp, index, parentId);
       if (nested.inserted) {
         const nextRows = [...rowsArr];
         nextRows[i] = { ...row, children: nested.comps };
         return { rows: nextRows, inserted: true };
       }
     }
-
     return { rows: rowsArr, inserted: false };
   };
 
@@ -502,7 +586,7 @@ function App() {
       newChildren.splice(index, 0, newComp);
       return { ...row, children: newChildren };
     }));
-    setSelectedId(newComp.id);
+    setSelectedIds([newComp.id]);
   }, [setRows, currentScreenId]);
 
   // ── Create new row ────────────────────────────────────────────────────────
@@ -523,12 +607,13 @@ function App() {
       }
       return s;
     }));
-    if (newRow.children.length > 0) setSelectedId(newRow.children[0].id);
-    else setSelectedId(newRow.id);
+    if (newRow.children.length > 0) setSelectedIds([newRow.children[0].id]);
+    else setSelectedIds([newRow.id]);
   }, [currentScreenId]);
 
   // ── Move existing component ───────────────────────────────────────────────
   const moveComponent = useCallback((item, toRowId, toIndex, newRowAfter = null, parentId = null) => {
+    console.log(`🚀 [DEBUG] moveComponent: id=${item.id}, toRow=${toRowId}, toIndex=${toIndex}, newRowAfter=${newRowAfter}, parentId=${parentId}`);
     setRows(prev => {
       const source = findInRows(prev, item.id);
       if (!source || !source.type) return prev;
@@ -538,7 +623,10 @@ function App() {
       }
 
       const removed = removeCompFromRows(prev, item.id);
-      if (!removed.moved) return prev;
+      if (!removed.moved) {
+        console.warn(`⚠️ [DEBUG] moveComponent: Component ${item.id} not found in any row.`);
+        return prev;
+      }
 
       // Apply extra props if moving into a special container (like Tabs)
       if (item.extraProps) {
@@ -549,6 +637,7 @@ function App() {
         const newRow = { id: mkId(), layout: { ...DEFAULT_LAYOUT }, children: [removed.moved] };
         const result = [...removed.rows];
         result.splice(newRowAfter ?? result.length, 0, newRow);
+        console.log(`🚀 [DEBUG] moveComponent: Created new row with component ${item.id}`);
         return result;
       }
 
@@ -558,7 +647,14 @@ function App() {
 
       const adjustedIndex = (!parentId && removed.parentId === toRowId && toIndex > removed.fromIndex) ? toIndex - 1 : toIndex;
       const inserted = insertIntoRows(removed.rows, toRowId, removed.moved, adjustedIndex, parentId);
-      return inserted.inserted ? inserted.rows : prev;
+      
+      if (!inserted.inserted) {
+        console.error(`❌ [DEBUG] moveComponent: Failed to insert component ${item.id} into target ${parentId || toRowId}`);
+        return prev; // Fallback to original state if insertion fails
+      }
+
+      console.log(`✅ [DEBUG] moveComponent: Successfully moved ${item.id} to ${parentId || toRowId} at index ${adjustedIndex}`);
+      return inserted.rows;
     });
   }, [findInRows, setRows]);
 
@@ -573,19 +669,99 @@ function App() {
   }, [setRows]);
 
   // ── Delete component ───────────────────────────────────────────────────────
-  const deleteComponent = useCallback((id) => {
+  const deleteComponent = useCallback((idOrIds) => {
+    const idsToDelete = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
     setRows(prev => {
-      const isRow = prev.some(r => r.id === id);
-      if (isRow) return prev.filter(r => r.id !== id);
-      return prev.map(row => ({ ...row, children: deleteCompRecursive(row.children, id) }))
-                 .filter(row => row.children && row.children.length > 0); 
+      let next = [...prev];
+      idsToDelete.forEach(id => {
+        const isRow = next.some(r => r.id === id);
+        if (isRow) next = next.filter(r => r.id !== id);
+        else next = next.map(row => ({ ...row, children: deleteCompRecursive(row.children, id) }));
+      });
+      return next;
     });
-    if (selectedId === id) setSelectedId(null);
-  }, [selectedId, setRows]);
+    setSelectedIds(prev => prev.filter(id => !idsToDelete.includes(id)));
+  }, [setRows]);
 
   // ── Duplicate component ────────────────────────────────────────────────────
-  const duplicateComponent = useCallback((id) => {
-    let newSelectedId = null;
+  const duplicateComponent = useCallback((idOrIds) => {
+    const idsToDup = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+    let newIds = [];
+
+    const cloneTree = (node) => {
+      const nid = mkId();
+      newIds.push(nid);
+      return {
+        ...node,
+        id: nid,
+        children: (node.children || []).map(cloneTree)
+      };
+    };
+
+    setScreens(prev => prev.map(s => {
+      if (s.id !== currentScreenId) return s;
+      
+      let nextRows = [...s.rows];
+      idsToDup.forEach(id => {
+        const isRow = nextRows.some(r => r.id === id);
+        if (isRow) {
+          nextRows = nextRows.flatMap(row => {
+            if (row.id === id) {
+              const duplicate = { ...row, id: mkId(), children: (row.children || []).map(cloneTree) };
+              return [row, duplicate];
+            }
+            return [row];
+          });
+        } else {
+           const duplicateTree = (comps) => comps.flatMap(comp => {
+            if (comp.id === id) {
+              const duplicate = cloneTree(comp);
+              return [comp, duplicate];
+            }
+            if (comp.children?.length) {
+              return [{ ...comp, children: duplicateTree(comp.children) }];
+            }
+            return [comp];
+          });
+          nextRows = nextRows.map(row => ({ ...row, children: duplicateTree(row.children) }));
+        }
+      });
+      
+      return { ...s, rows: nextRows };
+    }));
+
+    if (newIds.length > 0) setSelectedIds(newIds);
+  }, [currentScreenId, saveHistory]);
+
+  // ── Clipboard Management ──────────────────────────────────────────────────
+  // ── Seleccionar fila ──────────────────────────────────────────────────────
+  const selectRow = useCallback((rowId, multi = false) => {
+    setSelectedIds(prev => {
+      if (multi) {
+        if (prev.includes(rowId)) return prev.filter(id => id !== rowId);
+        return [...prev, rowId];
+      }
+      return [rowId];
+    });
+    setLastSelectedId(rowId);
+  }, []);
+
+  // ── Find selected element ──────────────────────────────────────────────────
+  const findSelected = useCallback(() => {
+    if (selectedIds.length === 0) return null;
+    return findInRows(rows, selectedIds[selectedIds.length - 1]);
+  }, [rows, selectedIds]);
+
+  const copyComponent = useCallback((id) => {
+    const comp = findInRows(rows, id);
+    if (comp) {
+      setClipboard(JSON.parse(JSON.stringify(comp)));
+      console.log(`📋 [DEBUG] Copied component ${id} to clipboard`);
+    }
+  }, [rows]);
+
+  const pasteComponent = useCallback(() => {
+    if (!clipboard) return;
 
     const cloneTree = (node) => ({
       ...node,
@@ -593,73 +769,67 @@ function App() {
       children: (node.children || []).map(cloneTree)
     });
 
-    const duplicateTree = (comps) => comps.flatMap(comp => {
-      if (comp.id === id) {
-        const duplicate = cloneTree(comp);
-        newSelectedId = duplicate.id;
-        return [comp, duplicate];
+    const pasted = cloneTree(clipboard);
+    
+    // Insert into current selected container or active screen's last row
+    const target = findSelected();
+    if (target && CONTAINER_TYPES.includes(target.type)) {
+      addToRow(pasted.type, rows[0]?.id, 0, target.id, pasted.props);
+    } else {
+      // Add to last row
+      const lastRowId = rows[rows.length - 1]?.id;
+      if (lastRowId) {
+        addToRow(pasted.type, lastRowId, (rows[rows.length-1].children || []).length, null, pasted.props);
+      } else {
+        addNewRow(pasted.type, null, null);
       }
-
-      if (comp.children?.length) {
-        return [{ ...comp, children: duplicateTree(comp.children) }];
-      }
-
-      return [comp];
-    });
-
-    setScreens(prev => prev.map(s => {
-      if (s.id !== currentScreenId) return s;
-      
-      // Check if ID is a row
-      const isRow = s.rows.some(r => r.id === id);
-      if (isRow) {
-        const nextRows = s.rows.flatMap(row => {
-          if (row.id === id) {
-            const duplicate = { ...row, id: mkId(), children: row.children.map(cloneTree) };
-            newSelectedId = duplicate.id;
-            return [row, duplicate];
-          }
-          return [row];
-        });
-        return { ...s, rows: nextRows };
-      }
-
-      // It's a component deep inside
-      return { ...s, rows: s.rows.map(row => ({ ...row, children: duplicateTree(row.children) })) };
-    }));
-
-    if (newSelectedId) setSelectedId(newSelectedId);
-  }, [currentScreenId]);
-
-  // ── Seleccionar fila ──────────────────────────────────────────────────────
-  const selectRow = useCallback((rowId) => {
-    setSelectedId(rowId);
-  }, []);
-
-  // ── Find selected element ──────────────────────────────────────────────────
-  const findSelected = () => {
-    if (!selectedId) return null;
-    return findInRows(rows, selectedId);
-  };
+    }
+    console.log(`📋 [DEBUG] Pasted component from clipboard`);
+  }, [clipboard, rows, findSelected, addToRow, addNewRow]);
 
   useEffect(() => {
     const handleShortcuts = (e) => {
-      if (!selectedId) return;
+      if (selectedIds.length === 0) return;
       const tagName = e.target?.tagName;
       if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return;
-      if (e.key === 'Delete') {
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const tagName = e.target?.tagName;
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || e.target?.isContentEditable || e.target?.closest('[contenteditable="true"]')) return;
+        
         e.preventDefault();
-        deleteComponent(selectedId);
+        deleteComponent(selectedIds);
       }
       if ((e.key === 'd' || e.key === 'D') && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        duplicateComponent(selectedId);
+        duplicateComponent(selectedIds);
+      }
+      if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      }
+      if ((e.key === 'y' || e.key === 'Y') && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        redo();
+      }
+      if ((e.key === 'c' || e.key === 'C') && (e.ctrlKey || e.metaKey)) {
+        const tagName = e.target?.tagName;
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return;
+        e.preventDefault();
+        copyComponent(selectedIds[selectedIds.length-1]);
+      }
+      if ((e.key === 'v' || e.key === 'V') && (e.ctrlKey || e.metaKey)) {
+        const tagName = e.target?.tagName;
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return;
+        e.preventDefault();
+        pasteComponent();
       }
     };
 
     window.addEventListener('keydown', handleShortcuts);
     return () => window.removeEventListener('keydown', handleShortcuts);
-  }, [selectedId, deleteComponent, duplicateComponent]);
+  }, [selectedIds, deleteComponent, duplicateComponent, copyComponent, pasteComponent, undo, redo]);
 
 
 
@@ -753,18 +923,18 @@ function App() {
     const p = comp.props || {};
     if (p.action === 'screen' && p.targetScreenId) {
       setCurrentScreenId(p.targetScreenId);
-      setSelectedId(null);
+      setSelectedIds([]);
     } else if (p.action === 'overlay' && p.targetOverlayId) {
       const target = findInRows(rows, p.targetOverlayId);
       const isCurrentlyOpen = target?.props?.isOpen;
       updateComponent(p.targetOverlayId, { isOpen: !isCurrentlyOpen });
-      if (!isCurrentlyOpen) setSelectedId(p.targetOverlayId);
+      if (!isCurrentlyOpen) setSelectedIds([p.targetOverlayId]);
     } else if (p.action === 'external' && p.href) {
       window.open(p.href, '_blank');
     } else if (p.action === 'email' && p.mailto) {
       window.location.href = `mailto:${p.mailto}`;
     }
-  }, [setCurrentScreenId, setSelectedId, updateComponent]);
+  }, [setCurrentScreenId, setSelectedIds, updateComponent, rows]);
 
   // ── Export HTML ───────────────────────────────────────────────────────────
   const escapeHtml = (value) => String(value || '')
@@ -1118,14 +1288,29 @@ function App() {
       case 'Form': {
         const layoutStyles = layoutToStyles(p.layout);
         const padding = p.padding || 10;
-        const formInner = (comp.children || []).map(c => generateHTML(c)).join('');
-        return wrapComponent(`<form class="retro-form" style="${styleObjToString(layoutStyles)} padding:${padding}px; box-sizing:border-box;">${formInner}</form>`);
+        const formInner = (comp.children || []).map(c => renderComponentExport(c, p.layout?.direction || 'row')).join('');
+        const formStyles = {
+          ...layoutStyles,
+          width: isWidthFill ? '100%' : (isWidthHug ? 'auto' : (p.width ? `${p.width}px` : '100%')),
+          height: isHeightFill ? '100%' : (isHeightHug ? 'auto' : 'auto'),
+          padding: `${padding}px`,
+          boxSizing: 'border-box'
+        };
+        return wrapComponent(`<form class="retro-form" style="${styleObjToString(formStyles)}">${formInner}</form>`);
       }
       case 'DataRepeater': {
         const layoutStyles = layoutToStyles(p.layout);
-        const repeaterInner = (comp.children || []).map(c => generateHTML(c)).join('');
+        const repeaterInner = (comp.children || []).map(c => renderComponentExport(c, p.layout?.direction || 'row')).join('');
+        const repeaterStyles = {
+          ...layoutStyles,
+          width: isWidthFill ? '100%' : (isWidthHug ? 'auto' : (p.width ? `${p.width}px` : '100%')),
+          height: isHeightFill ? '100%' : (isHeightHug ? 'auto' : 'auto'),
+          padding: '0',
+          border: 'none',
+          boxSizing: 'border-box'
+        };
         // Export just one instance as a template placeholder
-        return wrapComponent(`<div class="retro-data-repeater" style="${styleObjToString(layoutStyles)} padding:8px; border:1px dashed var(--accent); box-sizing:border-box;" data-table="${p.tableName || ''}">
+        return wrapComponent(`<div class="retro-data-repeater" style="${styleObjToString(repeaterStyles)}" data-table="${p.tableName || ''}">
           <!-- REPEATER TEMPLATE -->
           ${repeaterInner}
         </div>`);
@@ -1133,6 +1318,9 @@ function App() {
       case 'Loader': {
         const dur = (2 / (p.speed || 1)).toFixed(2);
         const color = getThemeColor(p.color, '--accent');
+        const loaderWidth = isWidthFill ? '100%' : (p.width ? `${p.width}px` : 'auto');
+        const loaderHeight = isHeightFill ? '100%' : (p.height ? `${p.height}px` : 'auto');
+        
         let loaderInner = '';
         if (p.loaderType === 'dots') {
           loaderInner = `<div class="retro-loader-dots">
@@ -1141,13 +1329,13 @@ function App() {
             <div style="width:${p.size/4}px;height:${p.size/4}px;background-color:${color};animation:retro-dots ${dur}s ease-in-out infinite 0.4s;"></div>
           </div>`;
         } else if (p.loaderType === 'bar') {
-          loaderInner = `<div class="retro-loader-bar" style="width:${p.size*2}px;height:${p.thickness||4}px;border:1px solid ${color};"><div style="background-color:${color};animation:retro-bar ${dur}s linear infinite;"></div></div>`;
+          loaderInner = `<div class="retro-loader-bar" style="width:100%;height:${p.thickness||4}px;border:1px solid ${color};"><div style="background-color:${color};animation:retro-bar ${dur}s linear infinite;"></div></div>`;
         } else if (p.loaderType === 'bounce') {
           loaderInner = `<div class="retro-loader-bounce" style="width:${p.size}px;height:${p.size/2}px;"><div style="width:${p.size/3}px;height:${p.size/3}px;background-color:${color};animation:retro-bounce ${dur}s cubic-bezier(0.455,0.03,0.515,0.955) infinite alternate;"></div></div>`;
         } else {
           loaderInner = `<div class="retro-loader-spinner" style="width:${p.size}px;height:${p.size}px;border:${p.thickness||4}px solid rgba(255,255,255,0.1);border-top-color:${color};animation:retro-spin ${dur}s linear infinite;"></div>`;
         }
-        return wrapComponent(`<div style="display:flex;align-items:center;justify-content:center;padding:10px;">${loaderInner}</div>`);
+        return wrapComponent(`<div style="display:flex;align-items:center;justify-content:center;padding:10px;width:${loaderWidth};height:${loaderHeight};box-sizing:border-box;">${loaderInner}</div>`);
       }
       case 'Tabs': {
         const tabsArr = p.tabs || [];
@@ -1523,7 +1711,7 @@ ${css}
     const initialScreens = [{ id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }];
     setScreens(initialScreens);
     setCurrentScreenId('screen-1');
-    setSelectedId(null);
+    setSelectedIds([]);
     setActiveWindow(null);
     setDatabase({ tables: [], data: {} });
     setShowProjects(false);
@@ -1556,7 +1744,7 @@ ${css}
         setCurrentProject({ id: 'default', name: 'Untitled' });
         setScreens([{ id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }]);
         setCurrentScreenId('screen-1');
-        setSelectedId(null);
+        setSelectedIds([]);
         setActiveWindow(null);
         setDatabase({ tables: [], data: {} });
         
@@ -1590,7 +1778,7 @@ ${css}
   };
 
   const selectedElement = findSelected();
-  const isRowSelected = selectedElement && (activeScreen?.rows || []).some(r => r.id === selectedId);
+  const isRowSelected = selectedElement && (activeScreen?.rows || []).some(r => selectedIds.includes(r.id));
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -1606,7 +1794,7 @@ ${css}
           <button className="toolbar-btn" onClick={exportHTML}>Export</button>
           <button className="toolbar-btn" onClick={() => setShowDatabase(!showDatabase)}>Database</button>
           <button className="toolbar-btn" onClick={() => setShowProjects(!showProjects)}>Projects</button>
-          <button className="toolbar-btn" onClick={() => selectedId && duplicateComponent(selectedId)} disabled={!selectedId}>Duplicate</button>
+          <button className="toolbar-btn" onClick={() => selectedIds.length > 0 && duplicateComponent(selectedIds)} disabled={selectedIds.length === 0}>Duplicate</button>
           <button className="toolbar-btn" onClick={() => setShowSettings(true)} title="Settings" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <div style={{ 
               width: 16, 
@@ -1627,8 +1815,8 @@ ${css}
           <div className="canvas-container" style={{ position: 'relative', overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
             <Canvas
               rows={rows}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
+              selectedIds={selectedIds}
+              onSelect={(id, multi) => selectRow(id, multi)}
               onDelete={deleteComponent}
               onDuplicate={duplicateComponent}
               viewMode={viewMode}
@@ -1692,7 +1880,7 @@ ${css}
               width: 40, 
               height: 40,
               padding: '4px',
-              borderRadius: '4px',
+              borderRadius: '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -1730,11 +1918,11 @@ ${css}
 
           </div>
           <Inspector 
-            key={selectedId || 'none'}
+            key={selectedIds.join(',') || 'none'}
             component={selectedElement} 
             onUpdate={updateComponent} 
-            onDelete={() => selectedId && deleteComponent(selectedId)}
-            onDuplicate={() => selectedId && duplicateComponent(selectedId)}
+            onDelete={() => selectedIds.length > 0 && deleteComponent(selectedIds)}
+            onDuplicate={() => selectedIds.length > 0 && duplicateComponent(selectedIds)}
             isRow={isRowSelected}
             database={database}
             screens={screens}
@@ -1744,7 +1932,7 @@ ${css}
             overlays={getOverlays()}
             canvasPadding={canvasPadding}
             onCanvasPaddingChange={setCanvasPadding}
-            selectedId={selectedId}
+            selectedIds={selectedIds}
             themeColors={THEMES[theme]}
           />
         </div>

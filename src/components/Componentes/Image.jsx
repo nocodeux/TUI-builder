@@ -134,13 +134,19 @@ function Image({
       <div style={containerStyle}>
         <div style={{
           ...imgStyle,
+          width: isWidthHug ? (width ? `${width}px` : '40px') : '100%',
+          height: isHeightHug ? (height ? `${height}px` : '40px') : '100%',
+          minWidth: isWidthHug ? 20 : 0,
+          minHeight: isHeightHug ? 20 : 0,
           backgroundColor: finalIconColor,
           maskImage: `url("${resolvedSrc}")`,
           maskRepeat: 'no-repeat',
           maskPosition: 'center',
+          maskSize: 'contain',
           WebkitMaskImage: `url("${resolvedSrc}")`,
           WebkitMaskRepeat: 'no-repeat',
           WebkitMaskPosition: 'center',
+          WebkitMaskSize: 'contain',
         }} />
       </div>
     );

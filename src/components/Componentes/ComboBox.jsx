@@ -1,4 +1,5 @@
 import React, { useContext } from 'react';
+import { DataContext } from './DataRepeater';
 import { FormContext } from './Form';
 
 function getThemeColor(val, themeVar) {
@@ -10,6 +11,8 @@ function ComboBox({
   items = ['Option 1', 'Option 2', 'Option 3'], 
   optionTable = '',
   optionField = '',
+  optionFilterField = '',
+  optionFilterValue = '',
   dataField = '',
   width = 150, 
   selectedIndex = 0, 
@@ -18,12 +21,26 @@ function ComboBox({
   bgColor = '',
   database = { data: {} }
 }) {
+  const data = useContext(DataContext);
   const formContext = useContext(FormContext);
   
+  const resolveTemplates = (txt, dataSource) => {
+    if (!txt || !dataSource) return txt;
+    return txt.replace(/\{\{(.*?)\}\}/g, (match, field) => {
+      const trimmedField = field.trim();
+      return dataSource[trimmedField] !== undefined ? String(dataSource[trimmedField]) : match;
+    });
+  };
+
   // Resolve items from DB if configured
   let finalItems = items;
   if (optionTable && optionField && database?.data?.[optionTable]) {
-    finalItems = database.data[optionTable].map(row => row[optionField]).filter(Boolean);
+    let rows = database.data[optionTable];
+    if (optionFilterField && optionFilterValue) {
+      const resolvedValue = resolveTemplates(optionFilterValue, data);
+      rows = rows.filter(r => String(r[optionFilterField]) === String(resolvedValue));
+    }
+    finalItems = rows.map(row => row[optionField]).filter(Boolean);
     // Remove duplicates
     finalItems = [...new Set(finalItems)];
   }
