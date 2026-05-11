@@ -18,6 +18,7 @@ import Canvas from './components/Canvas';
 import Inspector from './components/Inspector';
 import DatabasePanel from './components/DatabasePanel';
 import LevelTabs from './components/LevelTabs';
+import SpriteSheetManager from './components/SpriteSheetManager';
 import './App.css';
 import appCss from './App.css?raw';
 
@@ -72,9 +73,23 @@ function App() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [gameMode, setGameMode] = useState(false);
   const [selectedLevelId, setSelectedLevelId] = useState(null);
+  // Assets live in a sidecar file (projects/<id>.assets.json) so the main
+  // project JSON stays small and the editor can save schema changes without
+  // re-uploading megabytes of base64 sprite data.
+  const [assets, setAssetsState] = useState({ sprites: [], tilesets: [], sounds: [] });
+  const [showSpriteSheetManager, setShowSpriteSheetManager] = useState(false);
 
   const isInitialLoading = useRef(true);
   const saveTimer = useRef(null);
+  const assetsDirty = useRef(false);
+  const assetsSaveTimer = useRef(null);
+
+  // Wrap setAssets so every mutation flips the dirty flag and schedules a
+  // sidecar save. Components should always go through this setter.
+  const setAssets = useCallback((updater) => {
+    assetsDirty.current = true;
+    setAssetsState(prev => typeof updater === 'function' ? updater(prev) : updater);
+  }, []);
 
   const fetchProjects = async () => {
     try {
@@ -93,6 +108,27 @@ function App() {
   useEffect(() => {
     if (showProjects) fetchProjects();
   }, [showProjects]);
+  // ── Sidecar assets persistence ───────────────────────────────────────────
+  // Debounced 2s after any asset change. Skipped during initial load and when
+  // there's no real project (id === 'default').
+  useEffect(() => {
+    if (isInitialLoading.current) return;
+    if (!assetsDirty.current) return;
+    if (!currentProject?.id || currentProject.id === 'default') return;
+    if (assetsSaveTimer.current) clearTimeout(assetsSaveTimer.current);
+    assetsSaveTimer.current = setTimeout(() => {
+      fetch(`/api/projects/${currentProject.id}/assets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(assets),
+      })
+        .then(res => res.json())
+        .then(() => { assetsDirty.current = false; })
+        .catch(err => console.error('[Assets] save error:', err));
+    }, 2000);
+    return () => { if (assetsSaveTimer.current) clearTimeout(assetsSaveTimer.current); };
+  }, [assets, currentProject?.id]);
+
   // ── Persistencia ──────────────────────────────────────────────────────────
   const triggerSave = useCallback(() => {
     if (isInitialLoading.current) return;
@@ -1056,12 +1092,14 @@ function App() {
     }
     
     isInitialLoading.current = true;
-    fetch(`/api/projects/${currentProject.id}`)
-      .then(res => {
-        if (!res.ok) throw new Error('Not found');
-        return res.json();
-      })
-      .then(data => {
+    Promise.all([
+      fetch(`/api/projects/${currentProject.id}`).then(r => {
+        if (!r.ok) throw new Error('Not found');
+        return r.json();
+      }),
+      fetch(`/api/projects/${currentProject.id}/assets`).then(r => r.ok ? r.json() : { sprites: [], tilesets: [], sounds: [] }),
+    ])
+      .then(([data, sidecar]) => {
         if (data.screens && data.screens.length > 0) {
           setScreens(data.screens);
           setCurrentScreenId(data.currentScreenId || data.screens[0].id);
@@ -1071,7 +1109,13 @@ function App() {
         if (data.database) setDatabase(data.database);
         if (data.activeWindow) setActiveWindow(data.activeWindow);
         setGameMode(data.gameMode === true);
-        
+        // Sidecar is the source of truth; if missing, fall back to inline assets
+        // for projects authored before the sidecar split (cheap migration).
+        const sidecarHasAny = (sidecar?.sprites?.length || sidecar?.tilesets?.length || sidecar?.sounds?.length);
+        const fallback = data.assets || { sprites: [], tilesets: [], sounds: [] };
+        setAssetsState(sidecarHasAny ? sidecar : fallback);
+        assetsDirty.current = false;
+
         setSaveStatus('');
         // Allow saving after a short delay to ensure React has finished updating state
         setTimeout(() => { isInitialLoading.current = false; }, 500);
@@ -1900,6 +1944,8 @@ ${css}
     setActiveWindow(null);
     setDatabase({ tables: [], data: {} });
     setGameMode(false);
+    setAssetsState({ sprites: [], tilesets: [], sounds: [] });
+    assetsDirty.current = false;
     setShowProjects(false);
     setShowNewProjectModal(false);
   };
@@ -1934,6 +1980,8 @@ ${css}
         setActiveWindow(null);
         setDatabase({ tables: [], data: {} });
         setGameMode(false);
+        setAssetsState({ sprites: [], tilesets: [], sounds: [] });
+        assetsDirty.current = false;
         
         setTimeout(() => {
           isInitialLoading.current = false;
@@ -1969,19 +2017,85 @@ ${css}
 
   return (
     <DndProvider backend={HTML5Backend}>
-      <div className={`app ${theme}`}>
+      {/* Game Mode visual cues — pulsing accent on the toggle, plus
+          marching-ant stripes around all four sides of the viewport so
+          the user has a constant peripheral reminder they're authoring a
+          game project rather than a regular app. */}
+      <style>{`
+        @keyframes gm-pulse {
+          0%, 100% { box-shadow: 0 0 4px var(--accent), inset 0 0 4px var(--accent); }
+          50%      { box-shadow: 0 0 14px var(--accent), inset 0 0 8px var(--accent); }
+        }
+        .toolbar-btn.gm-active {
+          background: var(--accent);
+          color: var(--bg);
+          font-weight: bold;
+          letter-spacing: 0.5px;
+          animation: gm-pulse 1.8s ease-in-out infinite;
+          position: relative;
+        }
+        .toolbar-btn.gm-active::before {
+          content: '◆';
+          margin-right: 6px;
+          opacity: 0.85;
+        }
+        /* Marching-ant border around the .main-layout area (toolbox +
+           canvas + inspector). Excludes top toolbar and bottom status bar
+           by design. The stripe pattern is 24px; animation translates 24px
+           so motion is continuously visible. */
+        @keyframes gm-stripe-h { from { background-position: 0 0; } to { background-position: 10px 0; } }
+        @keyframes gm-stripe-v { from { background-position: 0 0; } to { background-position: 0 10px; } }
+        .gm-frame {
+          position: absolute;
+          z-index: 1000;
+          pointer-events: none;
+        }
+        .gm-frame-top, .gm-frame-bottom {
+          left: 0; right: 0; height: 1px;
+          background-image: repeating-linear-gradient(
+            90deg,
+            var(--accent) 0, var(--accent) 6px,
+            transparent 6px, transparent 10px
+          );
+          background-size: 10px 1px;
+        }
+        .gm-frame-left, .gm-frame-right {
+          top: 0; bottom: 0; width: 1px;
+          background-image: repeating-linear-gradient(
+            0deg,
+            var(--accent) 0, var(--accent) 6px,
+            transparent 6px, transparent 10px
+          );
+          background-size: 1px 10px;
+        }
+        .gm-frame-top    { top: 0;    animation: gm-stripe-h 1.2s linear infinite; }
+        .gm-frame-bottom { bottom: 0; animation: gm-stripe-h 1.2s linear infinite reverse; }
+        .gm-frame-left   { left: 0;   animation: gm-stripe-v 1.2s linear infinite; }
+        .gm-frame-right  { right: 0;  animation: gm-stripe-v 1.2s linear infinite reverse; }
+        .app.gm-on .toolbox h3 { color: var(--accent); }
+      `}</style>
+      <div className={`app ${theme}${gameMode ? ' gm-on' : ''}`}>
         <div className="toolbar">
           {Object.entries(THEMES).map(([key, t]) => (
             <button key={key} className={`toolbar-btn ${theme === key ? 'active' : ''}`} onClick={() => setTheme(key)}>{t.name}</button>
           ))}
           <span className="toolbar-sep">|</span>
           <button
-            className={`toolbar-btn ${gameMode ? 'active' : ''}`}
+            className={`toolbar-btn ${gameMode ? 'gm-active' : ''}`}
             onClick={() => setGameMode(g => !g)}
             title="Toggle Game Mode"
           >
             Game Mode
           </button>
+          {gameMode && (
+            <button
+              className={`toolbar-btn ${showSpriteSheetManager ? 'active' : ''}`}
+              onClick={() => setShowSpriteSheetManager(s => !s)}
+              title="Sprite Sheet Manager"
+            >
+              Sprites
+            </button>
+          )}
           <span className="toolbar-sep">|</span>
           <button className={`toolbar-btn ${viewMode === 'desktop' ? 'active' : ''}`} onClick={() => setViewMode('desktop')}>Desktop</button>
           <button className={`toolbar-btn ${viewMode === 'mobile' ? 'active' : ''}`} onClick={() => setViewMode('mobile')}>Mobile</button>
@@ -2006,6 +2120,14 @@ ${css}
         </div>
 
         <div className="main-layout" style={{ position: 'relative' }}>
+          {gameMode && (
+            <>
+              <div className="gm-frame gm-frame-top" />
+              <div className="gm-frame gm-frame-bottom" />
+              <div className="gm-frame gm-frame-left" />
+              <div className="gm-frame gm-frame-right" />
+            </>
+          )}
           <Toolbox gameMode={gameMode} />
           <div className="canvas-container" style={{ position: 'relative', overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
             {gameMode && activeScreen?.kind === 'world' && (
@@ -2324,6 +2446,14 @@ ${css}
 
         {showDatabase && (
           <DatabasePanel database={database} setDatabase={setDatabase} onClose={() => setShowDatabase(false)} />
+        )}
+
+        {showSpriteSheetManager && (
+          <SpriteSheetManager
+            assets={assets}
+            setAssets={setAssets}
+            onClose={() => setShowSpriteSheetManager(false)}
+          />
         )}
 
         {/* Confirm Modal — inside app div so theme CSS variables work */}

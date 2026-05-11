@@ -21,7 +21,7 @@ export default defineConfig({
               try {
                 const files = fs.readdirSync(projectsDir);
                 const projects = files
-                  .filter(f => f.endsWith('.json'))
+                  .filter(f => f.endsWith('.json') && !f.endsWith('.assets.json'))
                   .map(f => {
                     try {
                       const content = fs.readFileSync(path.join(projectsDir, f), 'utf-8');
@@ -41,6 +41,48 @@ export default defineConfig({
                 res.statusCode = 500;
                 res.end(JSON.stringify({ error: 'Failed to list projects' }));
               }
+              return;
+            }
+
+            // GET /api/projects/:id/assets - Load assets sidecar
+            const assetsLoadMatch = req.url.match(/\/api\/projects\/([^\/]+)\/assets$/);
+            if (req.method === 'GET' && assetsLoadMatch) {
+              const id = assetsLoadMatch[1];
+              const filePath = path.join(projectsDir, `${id}.assets.json`);
+              if (fs.existsSync(filePath)) {
+                res.end(fs.readFileSync(filePath, 'utf-8'));
+              } else {
+                res.end(JSON.stringify({ sprites: [], tilesets: [], sounds: [] }));
+              }
+              return;
+            }
+
+            // POST /api/projects/:id/assets - Save assets sidecar
+            if (req.method === 'POST' && assetsLoadMatch) {
+              const id = assetsLoadMatch[1];
+              let body = '';
+              req.on('data', chunk => { body += chunk; });
+              req.on('end', () => {
+                try {
+                  // Validate shape before writing — assets payloads can be large
+                  // and we want to fail fast on malformed JSON.
+                  JSON.parse(body);
+                  fs.writeFileSync(path.join(projectsDir, `${id}.assets.json`), body);
+                  res.end(JSON.stringify({ success: true }));
+                } catch (err) {
+                  res.statusCode = 500;
+                  res.end(JSON.stringify({ error: err.message }));
+                }
+              });
+              return;
+            }
+
+            // DELETE /api/projects/:id/assets - Delete assets sidecar
+            if (req.method === 'DELETE' && assetsLoadMatch) {
+              const id = assetsLoadMatch[1];
+              const filePath = path.join(projectsDir, `${id}.assets.json`);
+              if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+              res.end(JSON.stringify({ success: true }));
               return;
             }
 
@@ -83,13 +125,15 @@ export default defineConfig({
               return;
             }
 
-            // DELETE /api/projects/:id - Delete a project
+            // DELETE /api/projects/:id - Delete a project (and its assets sidecar)
             const deleteMatch = req.url.match(/\/api\/projects\/([^\/]+)$/);
             if (req.method === 'DELETE' && deleteMatch) {
               const id = deleteMatch[1];
               const filePath = path.join(projectsDir, `${id}.json`);
+              const assetsPath = path.join(projectsDir, `${id}.assets.json`);
               if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
+                if (fs.existsSync(assetsPath)) fs.unlinkSync(assetsPath);
                 res.end(JSON.stringify({ success: true }));
               } else {
                 res.statusCode = 404;
