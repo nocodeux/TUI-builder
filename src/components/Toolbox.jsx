@@ -31,7 +31,7 @@ const PALETTE = [
   { kind: 'item', type: 'Overlay', label: 'Overlay' },
 
   { kind: 'section', label: 'GAME', requires: 'gameMode' },
-  { kind: 'item', type: 'GameEntity', label: 'GameEntity', requires: 'gameMode', preview: true },
+  { kind: 'item', type: 'GameEntity', label: 'GameEntity', requires: 'gameMode', dragType: 'GAME_COMPONENT' },
   { kind: 'item', type: 'TileMap', label: 'TileMap', requires: 'gameMode', preview: true },
   { kind: 'item', type: 'CollisionShape', label: 'Collision', requires: 'gameMode', preview: true },
   { kind: 'item', type: 'Trigger', label: 'Trigger', requires: 'gameMode', preview: true },
@@ -43,13 +43,13 @@ const PALETTE = [
   { kind: 'item', type: 'GameView', label: 'GameView', requires: 'gameMode', preview: true },
 ];
 
-function ToolboxItem({ type, label, preview }) {
+function ToolboxItem({ type, label, preview, dragType }) {
   const [{ isDragging }, drag] = useDrag(() => ({
-    type: 'COMPONENT',
+    type: dragType || 'COMPONENT',
     item: { type },
     canDrag: () => !preview,
     collect: (monitor) => ({ isDragging: !!monitor.isDragging() })
-  }), [preview]);
+  }), [preview, dragType]);
 
   return (
     <div
@@ -94,7 +94,7 @@ function Toolbox({ gameMode = false }) {
       {visible.map((p, i) =>
         p.kind === 'section'
           ? <SectionHeader key={`s-${i}`} label={p.label} />
-          : <ToolboxItem key={p.type} type={p.type} label={p.label} preview={p.preview} />
+          : <ToolboxItem key={p.type} type={p.type} label={p.label} preview={p.preview} dragType={p.dragType} />
       )}
       <div style={{ marginTop: 16, fontSize: 10, color: 'var(--text-dim)', textAlign: 'center', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
         drag to canvas

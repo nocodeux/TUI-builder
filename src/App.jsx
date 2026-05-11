@@ -18,6 +18,7 @@ import Canvas from './components/Canvas';
 import Inspector from './components/Inspector';
 import DatabasePanel from './components/DatabasePanel';
 import LevelTabs from './components/LevelTabs';
+import LevelCanvas from './components/LevelCanvas';
 import SpriteSheetManager from './components/SpriteSheetManager';
 import './App.css';
 import appCss from './App.css?raw';
@@ -73,6 +74,10 @@ function App() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [gameMode, setGameMode] = useState(false);
   const [selectedLevelId, setSelectedLevelId] = useState(null);
+  // Which authoring surface the canvas shows when a level is active.
+  // 'game' = entities + tilemap (absolute positioning, LevelCanvas).
+  // 'hud'  = level.rows (flexbox layout, the existing Canvas).
+  const [levelLayer, setLevelLayer] = useState('game');
   // Assets live in a sidecar file (projects/<id>.assets.json) so the main
   // project JSON stays small and the editor can save schema changes without
   // re-uploading megabytes of base64 sprite data.
@@ -486,6 +491,70 @@ function App() {
     }));
     setSelectedLevelId(levelId);
     setSelectedIds([]);
+  }, [updateScreens]);
+
+  // ── Entities (live inside a level, absolute positioning) ────────────────
+  const makeDefaultEntity = useCallback((type, position = { x: 0, y: 0 }) => ({
+    id: mkId(),
+    type, // 'GameEntity' for now; future game component types reuse the same shape
+    name: type === 'GameEntity' ? 'Entity' : type,
+    role: 'prop',
+    position,
+    renderSize: { width: 64, height: 64 },
+    spriteSheetAssetId: null,
+    defaultAnimation: null,
+    facing: 'right',
+    stats: { hp: 100, speed: 100, damage: 10 },
+    persona: {},
+  }), []);
+
+  const addEntity = useCallback((worldId, levelId, type, position) => {
+    const entity = makeDefaultEntity(type, position);
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      return {
+        ...s,
+        levels: (s.levels || []).map(l =>
+          l.id === levelId ? { ...l, entities: [...(l.entities || []), entity] } : l
+        ),
+      };
+    }));
+    setSelectedIds([entity.id]);
+    setSelectedLevelId(null);
+    return entity.id;
+  }, [makeDefaultEntity, updateScreens]);
+
+  const updateEntity = useCallback((worldId, levelId, entityId, patch) => {
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      return {
+        ...s,
+        levels: (s.levels || []).map(l => {
+          if (l.id !== levelId) return l;
+          return {
+            ...l,
+            entities: (l.entities || []).map(e =>
+              e.id === entityId ? { ...e, ...patch } : e
+            ),
+          };
+        }),
+      };
+    }));
+  }, [updateScreens]);
+
+  const deleteEntities = useCallback((worldId, levelId, entityIds) => {
+    const ids = Array.isArray(entityIds) ? entityIds : [entityIds];
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      return {
+        ...s,
+        levels: (s.levels || []).map(l => {
+          if (l.id !== levelId) return l;
+          return { ...l, entities: (l.entities || []).filter(e => !ids.includes(e.id)) };
+        }),
+      };
+    }));
+    setSelectedIds(prev => prev.filter(id => !ids.includes(id)));
   }, [updateScreens]);
 
   // ── Color Migration for Existing Components ──────────────────────────────
@@ -2014,6 +2083,11 @@ ${css}
 
   const selectedElement = findSelected();
   const isRowSelected = selectedElement && (activeScreen?.rows || []).some(r => selectedIds.includes(r.id));
+  // Find the first selected ID that maps to an entity in the active level.
+  // Entities live outside the rows tree so findSelected() can't see them.
+  const selectedEntity = (activeLevel && selectedIds.length > 0)
+    ? (activeLevel.entities || []).find(e => selectedIds.includes(e.id)) || null
+    : null;
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -2138,6 +2212,8 @@ ${css}
                 onMoveLevel={moveLevel}
                 onDeleteLevel={deleteLevel}
                 onDuplicateLevel={duplicateLevel}
+                layer={levelLayer}
+                onLayerChange={setLevelLayer}
               />
             )}
             {!activeScreen && (
@@ -2154,6 +2230,19 @@ ${css}
                 </div>
               </div>
             )}
+            {activeLevel && levelLayer === 'game' ? (
+              <LevelCanvas
+                level={activeLevel}
+                worldId={activeScreen.id}
+                assets={assets}
+                selectedIds={selectedIds}
+                onSelectEntity={(id, shift) => selectRow(id, shift)}
+                onDeselect={() => setSelectedIds([])}
+                onAddEntity={(type, position) => addEntity(activeScreen.id, activeLevel.id, type, position)}
+                onMoveEntity={(id, position) => updateEntity(activeScreen.id, activeLevel.id, id, { position })}
+                onDeleteEntities={(ids) => deleteEntities(activeScreen.id, activeLevel.id, ids)}
+              />
+            ) : (
             <Canvas
               rows={rows}
               selectedIds={selectedIds}
@@ -2196,6 +2285,7 @@ ${css}
               }}
               currentUser={currentUser}
             />
+            )}
 
             {showUserJourney && (
               <UserJourneyPanel
@@ -2263,7 +2353,7 @@ ${css}
             key={selectedIds.join(',') || (selectedLevelId ? `level:${selectedLevelId}` : 'none')}
             component={selectedElement}
             onUpdate={updateComponent}
-            onDelete={() => selectedIds.length > 0 && deleteComponent(selectedIds)}
+            onDelete={() => selectedIds.length > 0 && (selectedEntity ? deleteEntities(activeScreen.id, activeLevel.id, selectedIds) : deleteComponent(selectedIds))}
             onDuplicate={() => selectedIds.length > 0 && duplicateComponent(selectedIds)}
             isRow={isRowSelected}
             database={database}
@@ -2277,12 +2367,15 @@ ${css}
             selectedIds={selectedIds}
             themeColors={THEMES[theme]}
             gameMode={gameMode}
+            assets={assets}
             selectedLevel={
               activeScreen?.kind === 'world' && selectedLevelId
                 ? (activeScreen.levels || []).find(l => l.id === selectedLevelId) || null
                 : null
             }
             onUpdateLevel={(levelId, patch) => activeScreen?.id && updateLevel(activeScreen.id, levelId, patch)}
+            selectedEntity={selectedEntity}
+            onUpdateEntity={(entityId, patch) => activeLevel && updateEntity(activeScreen.id, activeLevel.id, entityId, patch)}
           />
         </div>
 

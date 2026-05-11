@@ -150,11 +150,16 @@ function Inspector({
   selectedIds = [], themeColors = {}, activeScreen, screens, onUpdateScreen,
   overlays = [],
   gameMode = false, selectedLevel = null, onUpdateLevel = () => {},
+  selectedEntity = null, onUpdateEntity = () => {}, assets = null,
 }) {
   const selectedId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [localProps, setLocalProps] = useState({});
   const [tabsText, setTabsText] = useState('');
+  // Aspect lock for entity render size — UI preference, not persisted on
+  // the entity. Default ON whenever an entity is selected so size edits
+  // preserve the sprite's intrinsic aspect ratio by default.
+  const [aspectLocked, setAspectLocked] = useState(true);
   useEffect(() => {
     if (component) {
       const layoutProps = isRow
@@ -174,6 +179,205 @@ function Inspector({
       selectedIds.forEach(id => onUpdate(id, { [field]: value }));
     }
   }, [selectedIds, onUpdate]);
+
+  // ── GameEntity Inspector branch ─────────────────────────────────────────
+  // Active when a placed entity is selected on the LevelCanvas.
+  if (gameMode && selectedEntity) {
+    const ent = selectedEntity;
+    const sprites = assets?.sprites || [];
+    const sheet = sprites.find(s => s.id === ent.spriteSheetAssetId) || null;
+    const animations = sheet?.animations || [];
+    return (
+      <div className="inspector">
+        <h3>[INSPECTOR]</h3>
+        <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: 10, fontSize: 11 }}>
+          [ {ent.name || ent.type} · {ent.role} ]
+        </div>
+        <div className="property-divider" style={{ marginTop: 15 }} />
+
+        <div className="al-section-title">IDENTITY</div>
+        <div className="property-group">
+          <label>NAME</label>
+          <input type="text" value={ent.name || ''}
+            onChange={e => onUpdateEntity(ent.id, { name: e.target.value })} />
+        </div>
+        <div className="property-group">
+          <label>ROLE</label>
+          <select value={ent.role || 'prop'}
+            onChange={e => onUpdateEntity(ent.id, { role: e.target.value })}>
+            <option value="playerMain">Player (main)</option>
+            <option value="player2">Player 2</option>
+            <option value="player3">Player 3</option>
+            <option value="player4">Player 4</option>
+            <option value="enemy">Enemy</option>
+            <option value="npc">NPC</option>
+            <option value="interactive">Interactive</option>
+            <option value="prop">Prop</option>
+          </select>
+        </div>
+
+        <div className="property-divider" />
+        <div className="al-section-title">VISUAL</div>
+        <div className="property-group">
+          <label>SPRITE SHEET</label>
+          <select value={ent.spriteSheetAssetId || ''}
+            onChange={e => {
+              const newId = e.target.value || null;
+              const newSheet = sprites.find(s => s.id === newId);
+              // When a sprite is (re)assigned, snap renderSize to the frame's
+              // native pixel dimensions so the entity inherits the sprite's
+              // aspect ratio. The user can still resize freely after this.
+              const patch = { spriteSheetAssetId: newId, defaultAnimation: null };
+              if (newSheet?.frame?.width && newSheet?.frame?.height) {
+                patch.renderSize = { width: newSheet.frame.width, height: newSheet.frame.height };
+              }
+              onUpdateEntity(ent.id, patch);
+            }}>
+            <option value="">— none —</option>
+            {sprites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+        <div className="property-group">
+          <label>ANIMATION</label>
+          <select value={ent.defaultAnimation || ''}
+            disabled={!sheet}
+            onChange={e => onUpdateEntity(ent.id, { defaultAnimation: e.target.value || null })}>
+            <option value="">— none —</option>
+            {animations.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+          </select>
+        </div>
+        <div className="property-group">
+          <label>FACING</label>
+          <select value={ent.facing || 'right'}
+            onChange={e => onUpdateEntity(ent.id, { facing: e.target.value })}>
+            <option value="right">right</option>
+            <option value="left">left</option>
+          </select>
+        </div>
+
+        <div className="property-divider" />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="al-section-title" style={{ marginBottom: 0 }}>PLACEMENT</div>
+          {sheet?.frame?.width && sheet?.frame?.height && (
+            <button
+              type="button"
+              className="small-btn"
+              onClick={() => onUpdateEntity(ent.id, {
+                renderSize: { width: sheet.frame.width, height: sheet.frame.height }
+              })}
+              title={`Reset render size to sprite frame (${sheet.frame.width}×${sheet.frame.height})`}
+              style={{ fontSize: 9 }}
+            >↺ fit aspect</button>
+          )}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+          <div className="property-group">
+            <label>X (px)</label>
+            <input type="number" value={ent.position?.x ?? 0}
+              onChange={e => onUpdateEntity(ent.id, { position: { ...(ent.position || {}), x: parseInt(e.target.value, 10) || 0 } })} />
+          </div>
+          <div className="property-group">
+            <label>Y (px)</label>
+            <input type="number" value={ent.position?.y ?? 0}
+              onChange={e => onUpdateEntity(ent.id, { position: { ...(ent.position || {}), y: parseInt(e.target.value, 10) || 0 } })} />
+          </div>
+        </div>
+        {(() => {
+          const fw = sheet?.frame?.width;
+          const fh = sheet?.frame?.height;
+          const canLock = !!(fw && fh);
+          const aspect = canLock ? fw / fh : 1;
+          const effectiveLock = aspectLocked && canLock;
+          const updateRenderW = (newW) => {
+            const w = Math.max(1, newW);
+            const patch = { renderSize: { ...(ent.renderSize || {}), width: w } };
+            if (effectiveLock) patch.renderSize.height = Math.max(1, Math.round(w / aspect));
+            onUpdateEntity(ent.id, patch);
+          };
+          const updateRenderH = (newH) => {
+            const h = Math.max(1, newH);
+            const patch = { renderSize: { ...(ent.renderSize || {}), height: h } };
+            if (effectiveLock) patch.renderSize.width = Math.max(1, Math.round(h * aspect));
+            onUpdateEntity(ent.id, patch);
+          };
+          const iconUrl = `/src/img/icons/${effectiveLock ? 'imgi_43_lock' : 'imgi_13_unlock'}.svg`;
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 28px 1fr', gap: 4, alignItems: 'end' }}>
+              <div className="property-group">
+                <label>RENDER W (px)</label>
+                <input type="number" min="1" value={ent.renderSize?.width ?? 64}
+                  onChange={e => updateRenderW(parseInt(e.target.value, 10) || 1)} />
+              </div>
+              {/* Wrap the lock toggle in a property-group with an invisible
+                  label so it occupies the same vertical structure as the
+                  W/H inputs and the icon centers on the input row. */}
+              <div className="property-group" style={{ alignItems: 'stretch' }}>
+                <label style={{ visibility: 'hidden' }}>L</label>
+                <button
+                  type="button"
+                  onClick={() => canLock && setAspectLocked(l => !l)}
+                  disabled={!canLock}
+                  title={!canLock ? 'No sprite frame to lock against' : (effectiveLock ? `Aspect locked to sprite (${fw}:${fh}) — click to unlock` : 'Aspect free — click to lock to sprite')}
+                  style={{
+                    padding: 0,
+                    background: effectiveLock ? 'var(--accent)' : 'transparent',
+                    color: effectiveLock ? 'var(--bg)' : 'var(--text-dim)',
+                    border: '1px solid var(--border)',
+                    cursor: canLock ? 'pointer' : 'not-allowed',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    minHeight: 22,
+                  }}
+                >
+                  <div style={{
+                    width: 14, height: 14,
+                    backgroundColor: 'currentColor',
+                    maskImage: `url(${iconUrl})`,
+                    WebkitMaskImage: `url(${iconUrl})`,
+                    maskSize: 'contain',
+                    WebkitMaskSize: 'contain',
+                    maskRepeat: 'no-repeat',
+                    WebkitMaskRepeat: 'no-repeat',
+                    maskPosition: 'center',
+                    WebkitMaskPosition: 'center',
+                  }} />
+                </button>
+              </div>
+              <div className="property-group">
+                <label>RENDER H (px)</label>
+                <input type="number" min="1" value={ent.renderSize?.height ?? 64}
+                  onChange={e => updateRenderH(parseInt(e.target.value, 10) || 1)} />
+              </div>
+            </div>
+          );
+        })()}
+
+        <div className="property-divider" />
+        <div className="al-section-title">STATS</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
+          <div className="property-group">
+            <label>HP</label>
+            <input type="number" min="0" value={ent.stats?.hp ?? 100}
+              onChange={e => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), hp: parseInt(e.target.value, 10) || 0 } })} />
+          </div>
+          <div className="property-group">
+            <label>SPEED</label>
+            <input type="number" min="0" value={ent.stats?.speed ?? 100}
+              onChange={e => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), speed: parseInt(e.target.value, 10) || 0 } })} />
+          </div>
+          <div className="property-group">
+            <label>DAMAGE</label>
+            <input type="number" min="0" value={ent.stats?.damage ?? 10}
+              onChange={e => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), damage: parseInt(e.target.value, 10) || 0 } })} />
+          </div>
+        </div>
+
+        <div className="property-divider" />
+        <div style={{ color: 'var(--text-dim)', fontSize: 10, lineHeight: 1.6 }}>
+          Persona, behavior scripts and physics arrive in later phases. For now this entity is a static animated placement preview.
+        </div>
+      </div>
+    );
+  }
 
   // ── Level Inspector branch ──────────────────────────────────────────────
   // Active when a level tab is selected and there is no component selection.

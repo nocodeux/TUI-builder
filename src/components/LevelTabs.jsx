@@ -73,10 +73,13 @@ export default function LevelTabs({
   onMoveLevel,
   onDeleteLevel,
   onDuplicateLevel,
+  layer = 'game',
+  onLayerChange,
 }) {
   if (!world || world.kind !== 'world') return null;
   const levels = world.levels || [];
   const currentLevelId = world.currentLevelId;
+  const showLayerToggle = !!currentLevelId && !!onLayerChange;
 
   return (
     <div
@@ -118,6 +121,27 @@ export default function LevelTabs({
           marginBottom: -1,
         }}
       >+ Add Level</button>
+      {showLayerToggle && (
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 2, alignItems: 'center', paddingBottom: 6 }}>
+          <span style={{ fontSize: 9, color: 'var(--text-dim)', marginRight: 6 }}>LAYER</span>
+          {['game', 'hud'].map(k => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => onLayerChange(k)}
+              title={k === 'game' ? 'Game world (entities)' : 'HUD overlay (UI components)'}
+              style={{
+                padding: '2px 8px', fontSize: 10, fontFamily: 'monospace',
+                background: layer === k ? 'var(--accent)' : 'transparent',
+                color: layer === k ? 'var(--bg)' : 'var(--text-dim)',
+                border: '1px solid var(--border)',
+                cursor: 'pointer',
+                fontWeight: layer === k ? 'bold' : 'normal',
+              }}
+            >{k.toUpperCase()}</button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
