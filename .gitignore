@@ -87,6 +87,7 @@ PRD.md
 *.db-journal
 *.sqlite-journal
 projects
+docs
 
 # --- GENERATED OUTPUT FILES ---
 # Exported HTML files (these are output, not source code)
