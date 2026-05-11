@@ -69,6 +69,7 @@ function App() {
   const [clipboard, setClipboard] = useState(null);
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [gameMode, setGameMode] = useState(false);
 
   const isInitialLoading = useRef(true);
   const saveTimer = useRef(null);
@@ -98,16 +99,17 @@ function App() {
     
     setSaveStatus('Saving...');
     saveTimer.current = setTimeout(() => {
-      const projectData = { 
+      const projectData = {
         id: currentProject.id,
-        name: currentProject.name, 
-        theme, 
-        viewMode, 
-        screens, 
+        name: currentProject.name,
+        theme,
+        viewMode,
+        screens,
         currentScreenId,
-        activeWindow, 
-        database, 
-        lastSaved: new Date().toISOString() 
+        activeWindow,
+        database,
+        gameMode,
+        lastSaved: new Date().toISOString()
       };
 
       fetch('/api/projects', {
@@ -128,7 +130,7 @@ function App() {
         setTimeout(() => setSaveStatus(''), 2000);
       });
     }, 1000); // 1 second debounce
-  }, [screens, currentScreenId, database, currentProject, theme, viewMode, activeWindow, showProjects]);
+  }, [screens, currentScreenId, database, currentProject, theme, viewMode, activeWindow, gameMode, showProjects]);
 
   // Helper to get active screen
   const activeScreen = screens.find(s => s.id === currentScreenId) || screens[0];
@@ -886,6 +888,7 @@ function App() {
         if (data.viewMode) setViewMode(data.viewMode);
         if (data.database) setDatabase(data.database);
         if (data.activeWindow) setActiveWindow(data.activeWindow);
+        setGameMode(data.gameMode === true);
         
         setSaveStatus('');
         // Allow saving after a short delay to ensure React has finished updating state
@@ -1714,6 +1717,7 @@ ${css}
     setSelectedIds([]);
     setActiveWindow(null);
     setDatabase({ tables: [], data: {} });
+    setGameMode(false);
     setShowProjects(false);
     setShowNewProjectModal(false);
   };
@@ -1747,6 +1751,7 @@ ${css}
         setSelectedIds([]);
         setActiveWindow(null);
         setDatabase({ tables: [], data: {} });
+        setGameMode(false);
         
         setTimeout(() => {
           isInitialLoading.current = false;
@@ -1787,6 +1792,14 @@ ${css}
           {Object.entries(THEMES).map(([key, t]) => (
             <button key={key} className={`toolbar-btn ${theme === key ? 'active' : ''}`} onClick={() => setTheme(key)}>{t.name}</button>
           ))}
+          <span className="toolbar-sep">|</span>
+          <button
+            className={`toolbar-btn ${gameMode ? 'active' : ''}`}
+            onClick={() => setGameMode(g => !g)}
+            title="Toggle Game Mode"
+          >
+            Game Mode
+          </button>
           <span className="toolbar-sep">|</span>
           <button className={`toolbar-btn ${viewMode === 'desktop' ? 'active' : ''}`} onClick={() => setViewMode('desktop')}>Desktop</button>
           <button className={`toolbar-btn ${viewMode === 'mobile' ? 'active' : ''}`} onClick={() => setViewMode('mobile')}>Mobile</button>
