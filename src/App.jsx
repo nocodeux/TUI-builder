@@ -17,6 +17,7 @@ import Toolbox from './components/Toolbox';
 import Canvas from './components/Canvas';
 import Inspector from './components/Inspector';
 import DatabasePanel from './components/DatabasePanel';
+import LevelTabs from './components/LevelTabs';
 import './App.css';
 import appCss from './App.css?raw';
 
@@ -70,6 +71,7 @@ function App() {
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [gameMode, setGameMode] = useState(false);
+  const [selectedLevelId, setSelectedLevelId] = useState(null);
 
   const isInitialLoading = useRef(true);
   const saveTimer = useRef(null);
@@ -132,9 +134,29 @@ function App() {
     }, 1000); // 1 second debounce
   }, [screens, currentScreenId, database, currentProject, theme, viewMode, activeWindow, gameMode, showProjects]);
 
-  // Helper to get active screen
-  const activeScreen = screens.find(s => s.id === currentScreenId) || screens[0];
-  const rows = activeScreen.rows;
+  // Visible screens depend on the current mode. Screens (kind != 'world') and
+  // Worlds (kind === 'world') live in the same `screens` array but are surfaced
+  // separately so the two authoring modes stay isolated.
+  const visibleScreens = gameMode
+    ? screens.filter(s => s.kind === 'world')
+    : screens.filter(s => s.kind !== 'world');
+  const activeScreen = visibleScreens.find(s => s.id === currentScreenId) || visibleScreens[0] || null;
+  // When a level is selected on the active world, the canvas content is the
+  // level's rows; otherwise we author the world/screen's own rows (the HUD).
+  const activeLevel = (activeScreen?.kind === 'world' && activeScreen?.currentLevelId)
+    ? (activeScreen.levels || []).find(l => l.id === activeScreen.currentLevelId) || null
+    : null;
+  const rows = activeLevel ? (activeLevel.rows || []) : (activeScreen?.rows || []);
+
+  // When toggling modes, keep currentScreenId pointing at something visible.
+  useEffect(() => {
+    if (!activeScreen && visibleScreens.length > 0) {
+      setCurrentScreenId(visibleScreens[0].id);
+    } else if (activeScreen && activeScreen.id !== currentScreenId) {
+      setCurrentScreenId(activeScreen.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameMode]);
 
   // ── History Management ───────────────────────────────────────────────────
   const [isUndoing, setIsUndoing] = useState(false);
@@ -184,14 +206,25 @@ function App() {
   }, [history, historyIndex]);
 
   // Wrapped setRows to update the active screen in the screens array
+  // Routes row mutations to either Screen.rows or Level.rows depending on
+  // whether the active world has a level selected. Keeps undo/history snapshots
+  // intact because both arrays live inside the screens tree.
   const setRows = useCallback((newRowsOrFn) => {
     updateScreens(prev => {
       return prev.map(s => {
-        if (s.id === currentScreenId) {
-          const nextRows = typeof newRowsOrFn === 'function' ? newRowsOrFn(s.rows) : newRowsOrFn;
-          return { ...s, rows: nextRows };
+        if (s.id !== currentScreenId) return s;
+        // World + selected level → mutate that level's rows
+        if (s.kind === 'world' && s.currentLevelId) {
+          const levels = (s.levels || []).map(l => {
+            if (l.id !== s.currentLevelId) return l;
+            const nextRows = typeof newRowsOrFn === 'function' ? newRowsOrFn(l.rows || []) : newRowsOrFn;
+            return { ...l, rows: nextRows };
+          });
+          return { ...s, levels };
         }
-        return s;
+        // Screen, or World with no level selected → mutate the screen's own rows
+        const nextRows = typeof newRowsOrFn === 'function' ? newRowsOrFn(s.rows || []) : newRowsOrFn;
+        return { ...s, rows: nextRows };
       });
     });
   }, [currentScreenId, updateScreens]);
@@ -205,35 +238,64 @@ function App() {
   }, [screens, historyIndex]);
 
   const moveScreen = useCallback((dragIndex, hoverIndex) => {
+    // dragIndex / hoverIndex come from the User Journey Panel and refer to
+    // VISIBLE positions (filtered by the current mode). Translate them back
+    // to absolute positions in the underlying screens array before swapping.
     updateScreens(prev => {
+      const visible = gameMode
+        ? prev.filter(s => s.kind === 'world')
+        : prev.filter(s => s.kind !== 'world');
+      const dragged = visible[dragIndex];
+      const target = visible[hoverIndex];
+      if (!dragged || !target || dragged.id === target.id) return prev;
       const next = [...prev];
-      const [dragged] = next.splice(dragIndex, 1);
-      next.splice(hoverIndex, 0, dragged);
+      const fromAbs = next.findIndex(s => s.id === dragged.id);
+      next.splice(fromAbs, 1);
+      const toAbs = next.findIndex(s => s.id === target.id);
+      const insertAt = toAbs >= 0 ? (hoverIndex > dragIndex ? toAbs + 1 : toAbs) : next.length;
+      next.splice(insertAt, 0, dragged);
       return next;
     });
-  }, [updateScreens]);
+  }, [updateScreens, gameMode]);
 
   const addScreen = useCallback(() => {
-    const newScreen = { id: mkId(), name: `Screen ${screens.length + 1}`, rows: [], settings: { timeout: 0, nextScreenId: null } };
+    const base = { id: mkId(), name: `${gameMode ? 'World' : 'Screen'} ${screens.length + 1}`, rows: [], settings: { timeout: 0, nextScreenId: null } };
+    const newScreen = gameMode
+      ? { ...base, kind: 'world', levels: [], currentLevelId: null, worldSettings: { defaultViewport: 'topdown', defaultGravity: 0, themeMusicAssetId: null } }
+      : base;
     updateScreens(prev => [...prev, newScreen]);
     setCurrentScreenId(newScreen.id);
-  }, [screens.length, updateScreens]);
+  }, [screens.length, updateScreens, gameMode]);
 
   const deleteScreen = useCallback((screenId) => {
     const screen = screens.find(s => s.id === screenId);
-    if (screens.length <= 1) return;
-    const hasContent = screen && screen.rows.some(r => r.children && r.children.length > 0);
+    if (!screen) return;
+    // Worlds can always be deleted (project may have zero worlds, that's fine).
+    // Regular screens must keep at least one — otherwise app mode has nothing.
+    if (screen.kind !== 'world') {
+      const screenCount = screens.filter(s => s.kind !== 'world').length;
+      if (screenCount <= 1) return;
+    }
+    const hasContent = screen && (
+      (screen.rows || []).some(r => r.children && r.children.length > 0) ||
+      (screen.kind === 'world' && (screen.levels || []).length > 0)
+    );
+    const fallbackAfterDelete = (next) => {
+      if (currentScreenId !== screenId) return;
+      const sameKind = screen.kind === 'world'
+        ? next.filter(s => s.kind === 'world')
+        : next.filter(s => s.kind !== 'world');
+      setCurrentScreenId(sameKind[0]?.id || null);
+    };
     if (hasContent) {
       setConfirmModal({
-        title: 'Delete Screen',
+        title: screen.kind === 'world' ? 'Delete World' : 'Delete Screen',
         message: `Are you sure you want to delete "${screen.name}"?`,
-        confirmText: 'Delete screen',
+        confirmText: screen.kind === 'world' ? 'Delete world' : 'Delete screen',
         onConfirm: () => {
           updateScreens(prev => {
             const next = prev.filter(s => s.id !== screenId);
-            if (currentScreenId === screenId && next.length > 0) {
-              setCurrentScreenId(next[0].id);
-            }
+            fallbackAfterDelete(next);
             return next;
           });
           setConfirmModal(null);
@@ -244,9 +306,7 @@ function App() {
     }
     updateScreens(prev => {
       const next = prev.filter(s => s.id !== screenId);
-      if (currentScreenId === screenId && next.length > 0) {
-        setCurrentScreenId(next[0].id);
-      }
+      fallbackAfterDelete(next);
       return next;
     });
   }, [screens, currentScreenId, updateScreens]);
@@ -275,11 +335,122 @@ function App() {
         if (updates.settings) {
           return { ...s, settings: { ...(s.settings || {}), ...updates.settings } };
         }
+        if (updates.worldSettings) {
+          return { ...s, worldSettings: { ...(s.worldSettings || {}), ...updates.worldSettings } };
+        }
         return { ...s, ...updates };
       }
       return s;
     }));
+  }, [updateScreens]);
+
+  // ── Levels (only meaningful for screens with kind === 'world') ──────────
+  const makeDefaultLevel = useCallback((world, index) => {
+    const ws = world?.worldSettings || {};
+    return {
+      id: mkId(),
+      name: `Level ${index + 1}`,
+      viewport: ws.defaultViewport || 'topdown',
+      gravity: ws.defaultGravity ?? 0,
+      backgroundMusicAssetId: null,
+      spawnPointId: null,
+      // Each level has its own UI rows — same shape as Screen.rows. Mutations
+      // route here when the level is the active canvas surface.
+      rows: [],
+      tileMap: {
+        tileWidth: 32, tileHeight: 32, cols: 30, rows: 17,
+        tilesetAssetId: null,
+        layers: [{ id: mkId(), name: 'Background', kind: 'tiles', data: [] }],
+      },
+      entities: [],
+    };
   }, []);
+
+  const addLevel = useCallback((worldId) => {
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      const levels = s.levels || [];
+      const next = makeDefaultLevel(s, levels.length);
+      return { ...s, levels: [...levels, next], currentLevelId: next.id };
+    }));
+  }, [updateScreens, makeDefaultLevel]);
+
+  const moveLevel = useCallback((worldId, dragIndex, hoverIndex) => {
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      const levels = [...(s.levels || [])];
+      const [dragged] = levels.splice(dragIndex, 1);
+      levels.splice(hoverIndex, 0, dragged);
+      return { ...s, levels };
+    }));
+  }, [updateScreens]);
+
+  const deleteLevel = useCallback((worldId, levelId) => {
+    const world = screens.find(s => s.id === worldId);
+    const level = world?.levels?.find(l => l.id === levelId);
+    if (!level) return;
+    // A level has content if any of its surfaces is non-empty:
+    // (a) UI rows authored on the canvas (Phase 1), (b) game entities
+    // placed on the level (Phase 3+), or (c) painted tilemap data (Phase 3+).
+    const hasContent = (
+      (level.rows || []).some(r => (r.children || []).length > 0) ||
+      (level.entities || []).length > 0 ||
+      (level.tileMap?.layers || []).some(layer => (layer.data || []).some(v => v))
+    );
+    const apply = () => {
+      updateScreens(prev => prev.map(s => {
+        if (s.id !== worldId || s.kind !== 'world') return s;
+        const levels = (s.levels || []).filter(l => l.id !== levelId);
+        // After delete, fall back to the world overlay (currentLevelId = null)
+        // so the user sees a clear surface instead of being silently moved.
+        const nextCurrent = s.currentLevelId === levelId ? null : s.currentLevelId;
+        return { ...s, levels, currentLevelId: nextCurrent };
+      }));
+      if (selectedLevelId === levelId) setSelectedLevelId(null);
+    };
+    if (hasContent) {
+      setConfirmModal({
+        title: 'Delete Level',
+        message: `Are you sure you want to delete "${level.name}"? Its content will be removed.`,
+        confirmText: 'Delete level',
+        onConfirm: () => { apply(); setConfirmModal(null); },
+        onCancel: () => setConfirmModal(null),
+      });
+      return;
+    }
+    apply();
+  }, [screens, selectedLevelId, updateScreens]);
+
+  const duplicateLevel = useCallback((worldId, levelId) => {
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      const src = (s.levels || []).find(l => l.id === levelId);
+      if (!src) return s;
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.id = mkId();
+      copy.name = `${src.name} (Copy)`;
+      // regenerate ids inside the copy
+      (copy.tileMap?.layers || []).forEach(layer => { layer.id = mkId(); });
+      return { ...s, levels: [...(s.levels || []), copy] };
+    }));
+  }, [updateScreens]);
+
+  const updateLevel = useCallback((worldId, levelId, patch) => {
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      const levels = (s.levels || []).map(l => l.id === levelId ? { ...l, ...patch } : l);
+      return { ...s, levels };
+    }));
+  }, [updateScreens]);
+
+  const selectLevel = useCallback((worldId, levelId) => {
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      return { ...s, currentLevelId: levelId };
+    }));
+    setSelectedLevelId(levelId);
+    setSelectedIds([]);
+  }, [updateScreens]);
 
   // ── Color Migration for Existing Components ──────────────────────────────
   useEffect(() => {
@@ -597,21 +768,33 @@ function App() {
     if (type) {
       newRow.children = [mkComp(type)];
     }
-    setScreens(prevScreens => prevScreens.map(s => {
-      if (s.id === targetScreenId) {
-        const currentRows = s.rows;
+    if (targetScreenId === currentScreenId) {
+      // Goes through setRows which routes to Screen.rows or Level.rows correctly.
+      setRows(prev => {
+        if (afterIndex !== null) {
+          const next = [...prev];
+          next.splice(afterIndex, 0, newRow);
+          return next;
+        }
+        return [...prev, newRow];
+      });
+    } else {
+      // Cross-screen targeting (e.g. paste into another screen) — direct mutation.
+      // Levels never receive cross-screen drops today, so this stays at screen.rows.
+      setScreens(prevScreens => prevScreens.map(s => {
+        if (s.id !== targetScreenId) return s;
+        const currentRows = s.rows || [];
         if (afterIndex !== null) {
           const next = [...currentRows];
           next.splice(afterIndex, 0, newRow);
           return { ...s, rows: next };
         }
         return { ...s, rows: [...currentRows, newRow] };
-      }
-      return s;
-    }));
+      }));
+    }
     if (newRow.children.length > 0) setSelectedIds([newRow.children[0].id]);
     else setSelectedIds([newRow.id]);
-  }, [currentScreenId]);
+  }, [currentScreenId, setRows]);
 
   // ── Move existing component ───────────────────────────────────────────────
   const moveComponent = useCallback((item, toRowId, toIndex, newRowAfter = null, parentId = null) => {
@@ -700,10 +883,9 @@ function App() {
       };
     };
 
-    setScreens(prev => prev.map(s => {
-      if (s.id !== currentScreenId) return s;
-      
-      let nextRows = [...s.rows];
+    // Routes through setRows so duplication respects the active level (if any).
+    setRows(prev => {
+      let nextRows = [...prev];
       idsToDup.forEach(id => {
         const isRow = nextRows.some(r => r.id === id);
         if (isRow) {
@@ -728,12 +910,11 @@ function App() {
           nextRows = nextRows.map(row => ({ ...row, children: duplicateTree(row.children) }));
         }
       });
-      
-      return { ...s, rows: nextRows };
-    }));
+      return nextRows;
+    });
 
     if (newIds.length > 0) setSelectedIds(newIds);
-  }, [currentScreenId, saveHistory]);
+  }, [setRows]);
 
   // ── Clipboard Management ──────────────────────────────────────────────────
   // ── Seleccionar fila ──────────────────────────────────────────────────────
@@ -746,6 +927,7 @@ function App() {
       return [rowId];
     });
     setLastSelectedId(rowId);
+    setSelectedLevelId(null);
   }, []);
 
   // ── Find selected element ──────────────────────────────────────────────────
@@ -1824,8 +2006,32 @@ ${css}
         </div>
 
         <div className="main-layout" style={{ position: 'relative' }}>
-          <Toolbox />
+          <Toolbox gameMode={gameMode} />
           <div className="canvas-container" style={{ position: 'relative', overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {gameMode && activeScreen?.kind === 'world' && (
+              <LevelTabs
+                world={activeScreen}
+                onSelectLevel={selectLevel}
+                onAddLevel={addLevel}
+                onMoveLevel={moveLevel}
+                onDeleteLevel={deleteLevel}
+                onDuplicateLevel={duplicateLevel}
+              />
+            )}
+            {!activeScreen && (
+              <div style={{
+                position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: 'var(--text-dim)', fontSize: 12, textAlign: 'center', padding: 24, zIndex: 5,
+                background: 'var(--bg)',
+              }}>
+                <div>
+                  [ No {gameMode ? 'world' : 'screen'} selected ]<br />
+                  <span style={{ opacity: 0.6, fontSize: 10 }}>
+                    Open the {gameMode ? 'Worlds' : 'Journey'} panel and add {gameMode ? 'a World' : 'a Screen'} to start.
+                  </span>
+                </div>
+              </div>
+            )}
             <Canvas
               rows={rows}
               selectedIds={selectedIds}
@@ -1870,15 +2076,16 @@ ${css}
             />
 
             {showUserJourney && (
-              <UserJourneyPanel 
-                screens={screens} 
-                currentScreenId={currentScreenId} 
-                onSelect={setCurrentScreenId} 
-                onAdd={addScreen} 
+              <UserJourneyPanel
+                screens={visibleScreens}
+                currentScreenId={currentScreenId}
+                onSelect={setCurrentScreenId}
+                onAdd={addScreen}
                 onDelete={deleteScreen}
                 onMove={moveScreen}
                 onClose={() => setShowUserJourney(false)}
                 setConfirmModal={setConfirmModal}
+                gameMode={gameMode}
               />
             )}
 
@@ -1930,10 +2137,10 @@ ${css}
 
 
           </div>
-          <Inspector 
-            key={selectedIds.join(',') || 'none'}
-            component={selectedElement} 
-            onUpdate={updateComponent} 
+          <Inspector
+            key={selectedIds.join(',') || (selectedLevelId ? `level:${selectedLevelId}` : 'none')}
+            component={selectedElement}
+            onUpdate={updateComponent}
             onDelete={() => selectedIds.length > 0 && deleteComponent(selectedIds)}
             onDuplicate={() => selectedIds.length > 0 && duplicateComponent(selectedIds)}
             isRow={isRowSelected}
@@ -1947,6 +2154,13 @@ ${css}
             onCanvasPaddingChange={setCanvasPadding}
             selectedIds={selectedIds}
             themeColors={THEMES[theme]}
+            gameMode={gameMode}
+            selectedLevel={
+              activeScreen?.kind === 'world' && selectedLevelId
+                ? (activeScreen.levels || []).find(l => l.id === selectedLevelId) || null
+                : null
+            }
+            onUpdateLevel={(levelId, patch) => activeScreen?.id && updateLevel(activeScreen.id, levelId, patch)}
           />
         </div>
 
@@ -2155,7 +2369,7 @@ const TrashIcon = () => (
 // ─── User Journey Auxiliary Components ──────────────────────────────────────
 
 
-function DraggableScreenCard({ screen, index, currentScreenId, onSelect, onDelete, onMove, setConfirmModal }) {
+function DraggableScreenCard({ screen, index, currentScreenId, onSelect, onDelete, onMove, setConfirmModal, gameMode = false, canDelete = false }) {
   const ref = React.useRef(null);
   
   const [{ isDragging }, drag] = useDrag({
@@ -2188,19 +2402,23 @@ function DraggableScreenCard({ screen, index, currentScreenId, onSelect, onDelet
       onClick={() => onSelect(screen.id)}
     >
       <div className="uj-screen-thumb">
-        {screen.rows.length > 0 ? (
-          <div style={{ fontSize: 9, opacity: 0.5 }}>[ Screen {index + 1} ]</div>
+        {screen.kind === 'world' ? (
+          <div style={{ fontSize: 9, opacity: 0.6, color: 'var(--accent)' }}>
+            [ World · {(screen.levels || []).length} level{(screen.levels || []).length === 1 ? '' : 's'} ]
+          </div>
+        ) : screen.rows.length > 0 ? (
+          <div style={{ fontSize: 9, opacity: 0.5 }}>[ {gameMode ? 'Screen' : 'Screen'} {index + 1} ]</div>
         ) : (
           <div style={{ fontSize: 9, opacity: 0.3 }}>[ Empty ]</div>
         )}
       </div>
       <div className="uj-screen-info">
         <span className="uj-screen-name">{screen.name}</span>
-        {index > 0 && (
-          <button 
-            className="uj-screen-delete" 
-            onClick={(e) => { 
-              e.stopPropagation(); 
+        {canDelete && (
+          <button
+            className="uj-screen-delete"
+            onClick={(e) => {
+              e.stopPropagation();
               onDelete(screen.id);
             }}
           >
@@ -2212,17 +2430,24 @@ function DraggableScreenCard({ screen, index, currentScreenId, onSelect, onDelet
   );
 }
 
-function UserJourneyPanel({ screens, currentScreenId, onSelect, onAdd, onDelete, onMove, onClose, setConfirmModal }) {
+function UserJourneyPanel({ screens, currentScreenId, onSelect, onAdd, onDelete, onMove, onClose, setConfirmModal, gameMode = false }) {
+  // Worlds can always be deleted; regular screens cannot delete the last one.
+  const cardCanDelete = (screen) => gameMode ? true : screens.length > 1;
   return (
     <div className="user-journey-panel">
       <div className="uj-header">
-        <span>[ USER JOURNEY ]</span>
+        <span>[ {gameMode ? 'WORLDS' : 'USER JOURNEY'} ]</span>
         <button className="uj-close" onClick={onClose}>X</button>
       </div>
       <div className="uj-content">
         <div className="uj-screens-list">
+          {screens.length === 0 && (
+            <div style={{ color: 'var(--text-dim)', fontSize: 11, padding: 12, textAlign: 'center' }}>
+              [ No {gameMode ? 'worlds' : 'screens'} yet ]
+            </div>
+          )}
           {screens.map((screen, idx) => (
-            <DraggableScreenCard 
+            <DraggableScreenCard
               key={screen.id}
               screen={screen}
               index={idx}
@@ -2231,11 +2456,13 @@ function UserJourneyPanel({ screens, currentScreenId, onSelect, onAdd, onDelete,
               onDelete={onDelete}
               onMove={onMove}
               setConfirmModal={setConfirmModal}
+              gameMode={gameMode}
+              canDelete={cardCanDelete(screen)}
             />
           ))}
           <button className="uj-add-screen" onClick={onAdd}>
             <div style={{ fontSize: 24, marginBottom: 4 }}>+</div>
-            <span>Add Screen</span>
+            <span>{gameMode ? 'Add World' : 'Add Screen'}</span>
           </button>
         </div>
       </div>

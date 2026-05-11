@@ -144,11 +144,12 @@ function AutoLayoutPanel({ layout = {}, onUpdate }) {
 }
 
 // ─── Inspector principal ──────────────────────────────────────────────────────
-function Inspector({ 
-  component, isRow, onUpdate, onDelete, onDuplicate, 
-  windows, database, canvasPadding, onCanvasPaddingChange, 
+function Inspector({
+  component, isRow, onUpdate, onDelete, onDuplicate,
+  windows, database, canvasPadding, onCanvasPaddingChange,
   selectedIds = [], themeColors = {}, activeScreen, screens, onUpdateScreen,
-  overlays = []
+  overlays = [],
+  gameMode = false, selectedLevel = null, onUpdateLevel = () => {},
 }) {
   const selectedId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
   const [showIconPicker, setShowIconPicker] = useState(false);
@@ -173,6 +174,77 @@ function Inspector({
       selectedIds.forEach(id => onUpdate(id, { [field]: value }));
     }
   }, [selectedIds, onUpdate]);
+
+  // ── Level Inspector branch ──────────────────────────────────────────────
+  // Active when a level tab is selected and there is no component selection.
+  if (gameMode && selectedLevel && selectedIds.length === 0) {
+    const lvl = selectedLevel;
+    const tm = lvl.tileMap || {};
+    const patchTileMap = (patch) => onUpdateLevel(lvl.id, { tileMap: { ...tm, ...patch } });
+    return (
+      <div className="inspector">
+        <h3>[INSPECTOR]</h3>
+        <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: 10, fontSize: 11 }}>
+          [ Level: {lvl.name} ]
+        </div>
+        <div className="property-divider" style={{ marginTop: 15 }} />
+
+        <div className="al-section-title">LEVEL</div>
+        <div className="property-group">
+          <label>NAME</label>
+          <input type="text" value={lvl.name || ''}
+            onChange={e => onUpdateLevel(lvl.id, { name: e.target.value })} />
+        </div>
+        <div className="property-group">
+          <label>VIEWPORT</label>
+          <select value={lvl.viewport || 'topdown'}
+            onChange={e => onUpdateLevel(lvl.id, { viewport: e.target.value })}>
+            <option value="topdown">Top-down</option>
+            <option value="platformer">Platformer</option>
+            <option value="isometric">Isometric</option>
+            <option value="board">Board</option>
+          </select>
+        </div>
+        <div className="property-group">
+          <label>GRAVITY</label>
+          <input type="number" step="10" value={lvl.gravity ?? 0}
+            onChange={e => onUpdateLevel(lvl.id, { gravity: parseFloat(e.target.value) || 0 })} />
+        </div>
+
+        <div className="property-divider" />
+        <div className="al-section-title">TILEMAP</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+          <div className="property-group">
+            <label>TILE W (px)</label>
+            <input type="number" min="1" value={tm.tileWidth || 32}
+              onChange={e => patchTileMap({ tileWidth: parseInt(e.target.value, 10) || 32 })} />
+          </div>
+          <div className="property-group">
+            <label>TILE H (px)</label>
+            <input type="number" min="1" value={tm.tileHeight || 32}
+              onChange={e => patchTileMap({ tileHeight: parseInt(e.target.value, 10) || 32 })} />
+          </div>
+          <div className="property-group">
+            <label>COLS</label>
+            <input type="number" min="1" value={tm.cols || 30}
+              onChange={e => patchTileMap({ cols: parseInt(e.target.value, 10) || 30 })} />
+          </div>
+          <div className="property-group">
+            <label>ROWS</label>
+            <input type="number" min="1" value={tm.rows || 17}
+              onChange={e => patchTileMap({ rows: parseInt(e.target.value, 10) || 17 })} />
+          </div>
+        </div>
+
+        <div className="property-divider" />
+        <div style={{ color: 'var(--text-dim)', fontSize: 10, lineHeight: 1.7 }}>
+          <b style={{ color: 'var(--accent)' }}>NOTES</b><br />
+          Tileset asset, spawn point and music will be wired in Phase 2.<br />
+          Tile painting on canvas arrives in Phase 3.
+        </div>
+      </div>
+    );
+  }
 
   if (!component) {
     return (
@@ -257,6 +329,36 @@ function Inspector({
             ))}
           </div>
         )}
+        {gameMode && activeScreen?.kind === 'world' && (
+          <>
+            <div className="property-divider" style={{ marginTop: 20 }} />
+            <div className="al-section-title">WORLD</div>
+            <div className="property-group">
+              <label>DEFAULT VIEWPORT (new levels)</label>
+              <select
+                value={activeScreen.worldSettings?.defaultViewport || 'topdown'}
+                onChange={e => onUpdateScreen(activeScreen.id, { worldSettings: { ...(activeScreen.worldSettings || {}), defaultViewport: e.target.value } })}
+              >
+                <option value="topdown">Top-down</option>
+                <option value="platformer">Platformer</option>
+                <option value="isometric">Isometric</option>
+                <option value="board">Board</option>
+              </select>
+            </div>
+            <div className="property-group">
+              <label>DEFAULT GRAVITY (new levels)</label>
+              <input
+                type="number" step="10"
+                value={activeScreen.worldSettings?.defaultGravity ?? 0}
+                onChange={e => onUpdateScreen(activeScreen.id, { worldSettings: { ...(activeScreen.worldSettings || {}), defaultGravity: parseFloat(e.target.value) || 0 } })}
+              />
+            </div>
+            <div style={{ color: 'var(--text-dim)', fontSize: 10, marginTop: 6 }}>
+              {(activeScreen.levels || []).length} level{(activeScreen.levels || []).length === 1 ? '' : 's'} in this world.
+            </div>
+          </>
+        )}
+
         <div className="property-divider" />
         <div style={{ color: 'var(--text-dim)', fontSize: 10, lineHeight: 1.7 }}>
           <b style={{ color: 'var(--accent)' }}>SHORTCUTS</b><br />
