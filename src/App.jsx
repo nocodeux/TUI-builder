@@ -13,6 +13,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
+import * as projectStorage from './lib/storage.js';
 import Toolbox from './components/Toolbox';
 import Canvas from './components/Canvas';
 import Inspector from './components/Inspector';
@@ -75,8 +76,7 @@ function App() {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects');
-      const data = await res.json();
+      const data = await projectStorage.fetchProjects();
       setProjectList(data);
     } catch (err) {
       console.error('Failed to fetch projects:', err);
@@ -110,12 +110,7 @@ function App() {
         lastSaved: new Date().toISOString() 
       };
 
-      fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(projectData)
-      })
-      .then(res => res.json())
+      projectStorage.saveProject(projectData)
       .then(() => {
         setSaveStatus('Saved');
         localStorage.setItem('nanostudio_current_project', JSON.stringify(currentProject));
@@ -872,12 +867,9 @@ function App() {
     }
     
     isInitialLoading.current = true;
-    fetch(`/api/projects/${currentProject.id}`)
-      .then(res => {
-        if (!res.ok) throw new Error('Not found');
-        return res.json();
-      })
+    projectStorage.loadProject(currentProject.id)
       .then(data => {
+        if (!data) throw new Error('Not found');
         if (data.screens && data.screens.length > 0) {
           setScreens(data.screens);
           setCurrentScreenId(data.currentScreenId || data.screens[0].id);
@@ -886,13 +878,12 @@ function App() {
         if (data.viewMode) setViewMode(data.viewMode);
         if (data.database) setDatabase(data.database);
         if (data.activeWindow) setActiveWindow(data.activeWindow);
-        
+
         setSaveStatus('');
-        // Allow saving after a short delay to ensure React has finished updating state
         setTimeout(() => { isInitialLoading.current = false; }, 500);
       })
       .catch((err) => {
-        console.error('Error loading project from API:', err);
+        console.error('Error loading project:', err);
         isInitialLoading.current = false;
       });
   }, [currentProject.id]);
@@ -1725,9 +1716,8 @@ ${css}
 
   const loadProject = async (id) => {
     try {
-      const res = await fetch(`/api/projects/${id}`);
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await projectStorage.loadProject(id);
+      if (!data) return;
       setCurrentProject({ id: data.id, name: data.name });
       setShowProjects(false);
     } catch (err) {
@@ -1738,7 +1728,7 @@ ${css}
   const deleteProject = async (id) => {
     if (!confirm('Delete project?')) return;
     try {
-      await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+      await projectStorage.deleteProject(id);
       if (currentProject.id === id) {
         isInitialLoading.current = true;
         setCurrentProject({ id: 'default', name: 'Untitled' });
@@ -1747,10 +1737,7 @@ ${css}
         setSelectedIds([]);
         setActiveWindow(null);
         setDatabase({ tables: [], data: {} });
-        
-        setTimeout(() => {
-          isInitialLoading.current = false;
-        }, 500);
+        setTimeout(() => { isInitialLoading.current = false; }, 500);
       }
       fetchProjects();
     } catch (err) {
@@ -1760,15 +1747,7 @@ ${css}
 
   const renameProject = async (id, name) => {
     try {
-      const res = await fetch(`/api/projects/${id}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const updated = { ...data, name };
-      await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated)
-      });
+      await projectStorage.renameProject(id, name);
       if (currentProject.id === id) setCurrentProject(p => ({ ...p, name }));
       setEditingProjectId(null);
       fetchProjects();
@@ -1800,8 +1779,8 @@ ${css}
               width: 16, 
               height: 16, 
               backgroundColor: 'currentColor', 
-              maskImage: 'url(/src/img/icons/imgi_17_gear.svg)',
-              WebkitMaskImage: 'url(/src/img/icons/imgi_17_gear.svg)',
+              maskImage: 'url(/img/icons/imgi_17_gear.svg)',
+              WebkitMaskImage: 'url(/img/icons/imgi_17_gear.svg)',
               maskSize: 'contain',
               WebkitMaskSize: 'contain',
               maskRepeat: 'no-repeat',
@@ -1905,8 +1884,8 @@ ${css}
               width: 32, 
               height: 32, 
               backgroundColor: 'currentColor', 
-              maskImage: 'url(/src/img/icons/imgi_47_monitor-medical.svg)',
-              WebkitMaskImage: 'url(/src/img/icons/imgi_47_monitor-medical.svg)',
+              maskImage: 'url(/img/icons/imgi_47_monitor-medical.svg)',
+              WebkitMaskImage: 'url(/img/icons/imgi_47_monitor-medical.svg)',
               maskSize: 'contain',
               WebkitMaskSize: 'contain',
               maskRepeat: 'no-repeat',
