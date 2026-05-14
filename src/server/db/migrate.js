@@ -17,6 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
+import bcrypt from 'bcryptjs';
 import { query, runSchema } from './index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -101,11 +102,39 @@ async function migrate() {
   const dbCount = parseInt(rows[0].count, 10);
   console.log(`\n[migrate] DB now has ${dbCount} project(s). Expected ≥ ${jsonFiles.length}.`);
 
-  if (dbCount < jsonFiles.length) {
-    console.warn('[migrate] WARNING: DB count is less than file count. Check for errors.');
-  }
+  // Seed admin user from env vars and assign orphaned projects
+  await seedAdminUser();
 
   process.exit(0);
+}
+
+async function seedAdminUser() {
+  const email = process.env.ADMIN_EMAIL;
+  const password = process.env.ADMIN_PASSWORD;
+  if (!email || !password) return;
+
+  const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
+  let adminId;
+
+  if (existing.rows.length) {
+    adminId = existing.rows[0].id;
+    console.log(`[migrate] Admin user already exists (${email})`);
+  } else {
+    const hash = await bcrypt.hash(password, 12);
+    const { rows } = await query(
+      `INSERT INTO users (email, password_hash, display_name, role) VALUES ($1, $2, 'Admin', 'admin') RETURNING id`,
+      [email, hash]
+    );
+    adminId = rows[0].id;
+    console.log(`[migrate] Admin user created (${email})`);
+  }
+
+  // Assign all projects without an owner to the admin user
+  const { rowCount } = await query(
+    'UPDATE projects SET owner_id = $1 WHERE owner_id IS NULL',
+    [adminId]
+  );
+  if (rowCount > 0) console.log(`[migrate] Assigned ${rowCount} orphaned project(s) to admin`);
 }
 
 migrate().catch(err => {

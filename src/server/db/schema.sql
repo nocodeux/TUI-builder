@@ -40,3 +40,26 @@ CREATE TABLE IF NOT EXISTS assets (
 );
 
 CREATE INDEX IF NOT EXISTS idx_assets_project ON assets(project_id);
+
+-- ─── Phase 5: Users ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS users (
+  id            TEXT         PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  email         TEXT         UNIQUE NOT NULL,
+  password_hash TEXT,                        -- null for OAuth-only accounts
+  display_name  TEXT,
+  avatar_url    TEXT,
+  x_id          TEXT         UNIQUE,
+  x_handle      TEXT,
+  google_id     TEXT         UNIQUE,
+  role          TEXT         NOT NULL DEFAULT 'user',
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  last_login    TIMESTAMPTZ
+);
+
+-- owner_id on projects (nullable — null = legacy / single-user mode)
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_id TEXT REFERENCES users(id);
+CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
+
+-- owner_id on assets
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS owner_id TEXT REFERENCES users(id);
+CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_id);

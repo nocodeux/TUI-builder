@@ -9,34 +9,27 @@ const projectsDir = path.resolve(__dirname, '../../../projects');
 
 export const projectsRouter = express.Router();
 
-// ─── Storage drivers ─────────────────────────────────────────────────────────
-// useDb() checks once per request if the DB is configured and reachable.
-// If not, all operations fall back to the filesystem (Phase 1 behaviour).
-// This lets Phase 1 and Phase 2 coexist: just set DATABASE_URL to upgrade.
-
-async function useDb() {
-  return isAvailable();
-}
+async function useDb() { return isAvailable(); }
 
 function ensureDir() {
   if (!fs.existsSync(projectsDir)) fs.mkdirSync(projectsDir, { recursive: true });
 }
 
-// ─── List projects ────────────────────────────────────────────────────────────
-projectsRouter.get('/', async (_req, res) => {
+// owner_id from JWT — undefined in single-user (env) mode
+function ownerId(req) { return req.user?.userId || null; }
+
+// ─── List projects ─────────────────────────────────────────────────────────────
+projectsRouter.get('/', async (req, res) => {
   try {
     if (await useDb()) {
-      const { rows } = await query(
-        `SELECT id, name, last_saved AS "lastSaved"
-         FROM projects
-         ORDER BY last_saved DESC`
-      );
+      const owner = ownerId(req);
+      const { rows } = owner
+        ? await query(`SELECT id, name, last_saved AS "lastSaved" FROM projects WHERE owner_id = $1 ORDER BY last_saved DESC`, [owner])
+        : await query(`SELECT id, name, last_saved AS "lastSaved" FROM projects ORDER BY last_saved DESC`);
       return res.json(rows);
     }
-    // Filesystem fallback
     ensureDir();
-    const files = fs.readdirSync(projectsDir);
-    const projects = files
+    const projects = fs.readdirSync(projectsDir)
       .filter(f => f.endsWith('.json') && !f.endsWith('.assets.json'))
       .map(f => {
         try {
@@ -53,16 +46,18 @@ projectsRouter.get('/', async (_req, res) => {
   }
 });
 
-// ─── Load project ─────────────────────────────────────────────────────────────
+// ─── Load project ──────────────────────────────────────────────────────────────
 projectsRouter.get('/:id', async (req, res) => {
   const { id } = req.params;
   try {
     if (await useDb()) {
-      const { rows } = await query('SELECT data FROM projects WHERE id = $1', [id]);
+      const owner = ownerId(req);
+      const { rows } = owner
+        ? await query('SELECT data FROM projects WHERE id = $1 AND owner_id = $2', [id, owner])
+        : await query('SELECT data FROM projects WHERE id = $1', [id]);
       if (!rows.length) return res.status(404).json({ error: 'Project not found' });
       return res.json(rows[0].data);
     }
-    // Filesystem fallback
     const filePath = path.join(projectsDir, `${id}.json`);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Project not found' });
     res.json(JSON.parse(fs.readFileSync(filePath, 'utf-8')));
@@ -72,7 +67,7 @@ projectsRouter.get('/:id', async (req, res) => {
   }
 });
 
-// ─── Load assets sidecar ──────────────────────────────────────────────────────
+// ─── Load assets sidecar ───────────────────────────────────────────────────────
 projectsRouter.get('/:id/assets', async (req, res) => {
   const { id } = req.params;
   const empty = { sprites: [], tilesets: [], sounds: [], backgrounds: [] };
@@ -81,7 +76,6 @@ projectsRouter.get('/:id/assets', async (req, res) => {
       const { rows } = await query('SELECT assets_json FROM projects WHERE id = $1', [id]);
       return res.json(rows.length ? (rows[0].assets_json || empty) : empty);
     }
-    // Filesystem fallback
     ensureDir();
     const filePath = path.join(projectsDir, `${id}.assets.json`);
     res.json(fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf-8')) : empty);
@@ -91,29 +85,25 @@ projectsRouter.get('/:id/assets', async (req, res) => {
   }
 });
 
-// ─── Save project ─────────────────────────────────────────────────────────────
+// ─── Save project ──────────────────────────────────────────────────────────────
 projectsRouter.post('/', async (req, res) => {
   const project = req.body;
   if (!project?.id) return res.status(400).json({ error: 'Project ID required' });
   try {
     if (await useDb()) {
+      const owner = ownerId(req);
       await query(
-        `INSERT INTO projects (id, name, data, last_saved)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO projects (id, name, data, owner_id, last_saved)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (id) DO UPDATE
-           SET name = EXCLUDED.name,
-               data = EXCLUDED.data,
+           SET name       = EXCLUDED.name,
+               data       = EXCLUDED.data,
+               owner_id   = COALESCE(projects.owner_id, EXCLUDED.owner_id),
                last_saved = EXCLUDED.last_saved`,
-        [
-          project.id,
-          project.name || 'Untitled',
-          JSON.stringify(project),
-          project.lastSaved ? new Date(project.lastSaved) : new Date(),
-        ]
+        [project.id, project.name || 'Untitled', JSON.stringify(project), owner, project.lastSaved ? new Date(project.lastSaved) : new Date()]
       );
       return res.json({ success: true });
     }
-    // Filesystem fallback
     ensureDir();
     fs.writeFileSync(path.join(projectsDir, `${project.id}.json`), JSON.stringify(project, null, 2));
     res.json({ success: true });
@@ -123,14 +113,11 @@ projectsRouter.post('/', async (req, res) => {
   }
 });
 
-// ─── Save assets sidecar ──────────────────────────────────────────────────────
+// ─── Save assets sidecar ───────────────────────────────────────────────────────
 projectsRouter.post('/:id/assets', async (req, res) => {
   const { id } = req.params;
   try {
     if (await useDb()) {
-      // Upsert: if project row exists update assets_json; if not create a minimal row.
-      // The project row should already exist from the POST /api/projects save, but
-      // defensive upsert avoids a foreign-key issue if assets are saved first.
       await query(
         `INSERT INTO projects (id, name, data, assets_json)
          VALUES ($1, 'Untitled', '{}', $2)
@@ -139,7 +126,6 @@ projectsRouter.post('/:id/assets', async (req, res) => {
       );
       return res.json({ success: true });
     }
-    // Filesystem fallback
     ensureDir();
     fs.writeFileSync(path.join(projectsDir, `${id}.assets.json`), JSON.stringify(req.body));
     res.json({ success: true });
@@ -149,7 +135,7 @@ projectsRouter.post('/:id/assets', async (req, res) => {
   }
 });
 
-// ─── Delete assets sidecar ────────────────────────────────────────────────────
+// ─── Delete assets sidecar ─────────────────────────────────────────────────────
 projectsRouter.delete('/:id/assets', async (req, res) => {
   const { id } = req.params;
   try {
@@ -158,7 +144,6 @@ projectsRouter.delete('/:id/assets', async (req, res) => {
       await query('UPDATE projects SET assets_json = $1 WHERE id = $2', [JSON.stringify(empty), id]);
       return res.json({ success: true });
     }
-    // Filesystem fallback
     const filePath = path.join(projectsDir, `${id}.assets.json`);
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     res.json({ success: true });
@@ -168,16 +153,18 @@ projectsRouter.delete('/:id/assets', async (req, res) => {
   }
 });
 
-// ─── Delete project ───────────────────────────────────────────────────────────
+// ─── Delete project ────────────────────────────────────────────────────────────
 projectsRouter.delete('/:id', async (req, res) => {
   const { id } = req.params;
   try {
     if (await useDb()) {
-      const { rowCount } = await query('DELETE FROM projects WHERE id = $1', [id]);
+      const owner = ownerId(req);
+      const { rowCount } = owner
+        ? await query('DELETE FROM projects WHERE id = $1 AND owner_id = $2', [id, owner])
+        : await query('DELETE FROM projects WHERE id = $1', [id]);
       if (!rowCount) return res.status(404).json({ error: 'Project not found' });
       return res.json({ success: true });
     }
-    // Filesystem fallback
     const filePath = path.join(projectsDir, `${id}.json`);
     const assetsPath = path.join(projectsDir, `${id}.assets.json`);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Project not found' });

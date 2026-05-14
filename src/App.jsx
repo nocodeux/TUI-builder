@@ -92,10 +92,15 @@ function App() {
   const [assets, setAssetsState] = useState({ sprites: [], tilesets: [], sounds: [], backgrounds: [] });
   const [showSpriteSheetManager, setShowSpriteSheetManager] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [loginMode, setLoginMode] = useState('login'); // 'login' | 'register'
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
+  const [regName, setRegName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirm, setRegConfirm] = useState('');
 
   const isInitialLoading = useRef(true);
   const saveTimer = useRef(null);
@@ -103,8 +108,24 @@ function App() {
   const assetsSaveTimer = useRef(null);
   const canvasContainerRef = useRef(null);
 
-  // Auth: verify token on mount, show login if absent/invalid
+  // Auth: handle OAuth redirect token in URL hash (#token=...)
   useEffect(() => {
+    const hash = window.location.hash;
+    if (hash.includes('token=')) {
+      const params = new URLSearchParams(hash.slice(1));
+      const token = params.get('token');
+      const error = params.get('error');
+      window.history.replaceState({}, '', window.location.pathname);
+      if (token) {
+        setToken(token);
+        fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+          .then(r => r.ok ? r.json() : null)
+          .then(user => { if (user) { setCurrentUser(user); setShowLogin(false); } });
+        return;
+      }
+      if (error) { setShowLogin(true); setLoginError(decodeURIComponent(error)); return; }
+    }
+    // Normal token check
     const token = getToken();
     if (!token) { setShowLogin(true); return; }
     fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
@@ -150,6 +171,31 @@ function App() {
     clearToken();
     setCurrentUser(null);
     setShowLogin(true);
+    setLoginMode('login');
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    if (regPassword !== regConfirm) { setLoginError('Passwords do not match'); return; }
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: regEmail, password: regPassword, displayName: regName }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setLoginError(data.error || 'Registration failed'); return; }
+      setToken(data.token);
+      setCurrentUser(data);
+      setShowLogin(false);
+      setRegPassword(''); setRegConfirm('');
+    } catch {
+      setLoginError('Connection error — is the server running?');
+    } finally {
+      setLoginLoading(false);
+    }
   };
 
   // Wrap setAssets so every mutation flips the dirty flag and schedules a
@@ -2799,55 +2845,85 @@ ${css}
           />
         )}
 
-        {/* Login Modal */}
+        {/* Auth Modal — login / register / OAuth */}
         {showLogin && (
           <div className="projects-overlay" style={{ zIndex: 99999 }}>
-            <div className="projects-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 360 }}>
+            <div className="projects-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
               <div className="modal-titlebar">
-                <span className="modal-title">[ TUIFY — Sign In ]</span>
+                <span className="modal-title">[ TUIFY ]</span>
               </div>
               <div className="modal-body">
-                <form onSubmit={handleLogin}>
-                  <div className="property-group" style={{ marginBottom: 12 }}>
-                    <label style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--text-dim)' }}>EMAIL</label>
-                    <input
-                      type="email"
-                      value={loginEmail}
-                      onChange={e => setLoginEmail(e.target.value)}
-                      placeholder="admin@tuify.app"
-                      autoFocus
-                      required
-                      style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' }}
-                    />
-                  </div>
-                  <div className="property-group" style={{ marginBottom: 16 }}>
-                    <label style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--text-dim)' }}>PASSWORD</label>
-                    <input
-                      type="password"
-                      value={loginPassword}
-                      onChange={e => setLoginPassword(e.target.value)}
-                      placeholder="••••••••"
-                      required
-                      style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' }}
-                    />
-                  </div>
-                  {loginError && (
-                    <div style={{ color: '#ff4444', fontSize: 12, marginBottom: 12, fontFamily: 'monospace' }}>
-                      {loginError}
-                    </div>
-                  )}
-                  <div className="modal-divider" />
-                  <div style={{ marginTop: 12, textAlign: 'right' }}>
-                    <button
-                      type="submit"
-                      className="modal-action-btn"
-                      disabled={loginLoading}
-                      style={{ background: 'var(--accent)', color: 'var(--bg)', minWidth: 80 }}
-                    >
-                      {loginLoading ? 'Signing in...' : 'Sign In'}
+                {/* Tabs */}
+                <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
+                  {['login', 'register'].map(mode => (
+                    <button key={mode} onClick={() => { setLoginMode(mode); setLoginError(''); }}
+                      style={{ flex: 1, padding: '6px 0', fontFamily: 'monospace', fontSize: 11, background: loginMode === mode ? 'var(--selected)' : 'transparent', color: loginMode === mode ? 'var(--text)' : 'var(--text-dim)', border: 'none', borderBottom: loginMode === mode ? '2px solid var(--accent)' : '2px solid transparent', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: 1 }}>
+                      {mode === 'login' ? 'Sign In' : 'Register'}
                     </button>
-                  </div>
-                </form>
+                  ))}
+                </div>
+
+                {/* Login form */}
+                {loginMode === 'login' && (
+                  <form onSubmit={handleLogin}>
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--text-dim)' }}>EMAIL</label>
+                      <input type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="you@example.com" autoFocus required
+                        style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                    </div>
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--text-dim)' }}>PASSWORD</label>
+                      <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="••••••••" required
+                        style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                    </div>
+                    {loginError && <div style={{ color: '#ff4444', fontSize: 12, marginBottom: 12, fontFamily: 'monospace' }}>{loginError}</div>}
+                    <div className="modal-divider" />
+                    <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <a href="/api/auth/x" style={{ fontSize: 11, padding: '4px 10px', border: '1px solid var(--border)', color: 'var(--text)', textDecoration: 'none', fontFamily: 'monospace' }}>𝕏</a>
+                        <a href="/api/auth/google" style={{ fontSize: 11, padding: '4px 10px', border: '1px solid var(--border)', color: 'var(--text)', textDecoration: 'none', fontFamily: 'monospace' }}>G</a>
+                      </div>
+                      <button type="submit" className="modal-action-btn" disabled={loginLoading}
+                        style={{ background: 'var(--accent)', color: 'var(--bg)', minWidth: 80 }}>
+                        {loginLoading ? 'Signing in...' : 'Sign In'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Register form */}
+                {loginMode === 'register' && (
+                  <form onSubmit={handleRegister}>
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--text-dim)' }}>DISPLAY NAME</label>
+                      <input type="text" value={regName} onChange={e => setRegName(e.target.value)} placeholder="Your name" autoFocus
+                        style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                    </div>
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--text-dim)' }}>EMAIL</label>
+                      <input type="email" value={regEmail} onChange={e => setRegEmail(e.target.value)} placeholder="you@example.com" required
+                        style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                    </div>
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--text-dim)' }}>PASSWORD</label>
+                      <input type="password" value={regPassword} onChange={e => setRegPassword(e.target.value)} placeholder="Min. 8 characters" required
+                        style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                    </div>
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--text-dim)' }}>CONFIRM PASSWORD</label>
+                      <input type="password" value={regConfirm} onChange={e => setRegConfirm(e.target.value)} placeholder="••••••••" required
+                        style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                    </div>
+                    {loginError && <div style={{ color: '#ff4444', fontSize: 12, marginBottom: 12, fontFamily: 'monospace' }}>{loginError}</div>}
+                    <div className="modal-divider" />
+                    <div style={{ marginTop: 12, textAlign: 'right' }}>
+                      <button type="submit" className="modal-action-btn" disabled={loginLoading}
+                        style={{ background: 'var(--accent)', color: 'var(--bg)', minWidth: 80 }}>
+                        {loginLoading ? 'Creating account...' : 'Create Account'}
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
             </div>
           </div>
