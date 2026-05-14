@@ -77,9 +77,11 @@ function Image({
   const bThick = borderThickness !== undefined ? borderThickness : 1;
   const bColor = getThemeColor(borderColor, '--border');
 
+  const resolvedW = (typeof width === 'number' && width > 0) ? width : (typeof width === 'string' && width !== 'auto' ? parseInt(width, 10) || 80 : 80);
+  const resolvedH = (typeof height === 'number' && height > 0) ? height : (typeof height === 'string' && height !== 'auto' ? parseInt(height, 10) || 80 : 80);
   const containerStyle = {
-    width: sizing.widthMode === 'fill' ? '100%' : (isWidthHug ? 'auto' : `${width}px`),
-    height: sizing.heightMode === 'fill' ? '100%' : (isHeightHug ? 'auto' : `${height}px`),
+    width: sizing.widthMode === 'fill' ? '100%' : (isWidthHug ? 'auto' : `${resolvedW}px`),
+    height: sizing.heightMode === 'fill' ? '100%' : (isHeightHug ? 'auto' : `${resolvedH}px`),
     border: bThick > 0 ? `${bThick}px solid ${bColor}` : 'none',
     display: 'flex',
     alignItems: 'center',

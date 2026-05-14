@@ -32,7 +32,7 @@ const PALETTE = [
 
   { kind: 'section', label: 'GAME', requires: 'gameMode' },
   { kind: 'item', type: 'GameEntity', label: 'GameEntity', requires: 'gameMode', dragType: 'GAME_COMPONENT' },
-  { kind: 'item', type: 'TileMap', label: 'TileMap', requires: 'gameMode', preview: true },
+  // TileMap is configured per-Level in the Inspector — not a draggable component.
   { kind: 'item', type: 'CollisionShape', label: 'Collision', requires: 'gameMode', preview: true },
   { kind: 'item', type: 'Trigger', label: 'Trigger', requires: 'gameMode', preview: true },
   { kind: 'item', type: 'Teleporter', label: 'Teleporter', requires: 'gameMode', preview: true },

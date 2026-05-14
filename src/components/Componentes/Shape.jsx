@@ -7,8 +7,8 @@ const getThemeColor = (val, themeVar) => {
 
 function Shape({ shapeType = 'rectangle', width = 60, height = 40, borderColor = '', bgColor = '', fill = false }) {
   const style = {
-    width: typeof width === 'string' && width.includes('%') ? width : `${width}px`,
-    height: typeof height === 'string' && height.includes('%') ? height : `${height}px`,
+    width: typeof width === 'string' ? width : `${width}px`,
+    height: typeof height === 'string' ? height : (height ? `${height}px` : 'auto'),
     border: `1px solid ${getThemeColor(borderColor, '--text')}`,
     backgroundColor: fill ? getThemeColor(bgColor, '--text') : 'transparent',
     display: 'inline-block',

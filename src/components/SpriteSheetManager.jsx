@@ -7,6 +7,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import GIF from 'gif.js';
 import gifWorkerUrl from 'gif.js/dist/gif.worker.js?url';
+import { loadMaskedImage, pickColorAt } from '../lib/imageMask';
+import { NumericInput } from '../lib/inputs';
 
 const mkId = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
 
@@ -216,37 +218,8 @@ function GapInput({ value, onCommit, ...rest }) {
   );
 }
 
-// Numeric input that allows the field to be temporarily empty while the user
-// types. The parent only sees committed numeric values (on blur or Enter).
-// Fixes the "can't clear the first digit" bug where parseInt('') || default
-// forces the field back to the default the moment it goes empty.
-function NumericInput({ value, onCommit, min = 0, max, ...rest }) {
-  const [draft, setDraft] = useState(String(value ?? ''));
-  useEffect(() => { setDraft(String(value ?? '')); }, [value]);
-  const commit = () => {
-    if (draft === '' || draft === '-') { setDraft(String(value ?? '')); return; }
-    let n = parseInt(draft, 10);
-    if (Number.isNaN(n)) { setDraft(String(value ?? '')); return; }
-    if (typeof min === 'number') n = Math.max(min, n);
-    if (typeof max === 'number') n = Math.min(max, n);
-    setDraft(String(n));
-    if (n !== value) onCommit(n);
-  };
-  return (
-    <input
-      type="text"
-      inputMode="numeric"
-      value={draft}
-      onChange={e => {
-        // Accept any digit/sign while editing — validate only on commit.
-        if (/^-?\d*$/.test(e.target.value)) setDraft(e.target.value);
-      }}
-      onBlur={commit}
-      onKeyDown={e => { if (e.key === 'Enter') { commit(); e.target.blur(); } }}
-      {...rest}
-    />
-  );
-}
+// NumericInput moved to src/lib/inputs.jsx — imported above. Anywhere a
+// committed numeric value is edited should use it instead of raw <input>.
 
 // ─── Animation preview canvas ────────────────────────────────────────────
 // Bounded to MAX_PREVIEW px on the longest side so high-resolution sprites
@@ -261,13 +234,18 @@ function AnimationPreview({ sheet, animation }) {
   const [playing, setPlaying] = useState(true);
   const [frame, setFrame] = useState(0);
 
+  const animTransparent = sheet?.frame?.transparentColor || null;
+  const animTolerance = sheet?.frame?.transparentTolerance ?? 0;
   useEffect(() => {
     if (!sheet?.src) return;
-    const img = new Image();
-    img.onload = () => { imgRef.current = img; setImgReady(true); };
-    img.src = sheet.src;
-    return () => { imgRef.current = null; setImgReady(false); };
-  }, [sheet?.src]);
+    let cancelled = false;
+    loadMaskedImage(sheet.src, animTransparent, animTolerance).then(entry => {
+      if (cancelled || !entry) return;
+      imgRef.current = entry.img;
+      setImgReady(true);
+    });
+    return () => { cancelled = true; imgRef.current = null; setImgReady(false); };
+  }, [sheet?.src, animTransparent, animTolerance]);
 
   const frames = animation?.frames || [];
   const fps = Math.max(1, animation?.fps || 6);
@@ -402,22 +380,41 @@ function GapBadge({ value, x, y, axis, onCommit }) {
 // any background, then draws a black halo behind each yellow line for
 // extra contrast on light sprites. Inline gap badges are positioned over
 // the canvas at the midpoints between cells.
-function SheetGridPreview({ sheet, maxWidth = 240, dimImage = true, onSize, onUpdateFrame }) {
+function SheetGridPreview({ sheet, maxWidth = 240, dimImage = true, onSize, onUpdateFrame, isPicking = false, onPickColor = null }) {
   const canvasRef = useRef(null);
   const [renderInfo, setRenderInfo] = useState(null); // { ratio, cellW, cellH }
+  const [badgesVisible, setBadgesVisible] = useState(true);
+  const [zoom, setZoom] = useState(1);
+  const ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
+  const zoomIn  = () => setZoom(z => ZOOM_STEPS.find(s => s > z) || z);
+  const zoomOut = () => setZoom(z => [...ZOOM_STEPS].reverse().find(s => s < z) || z);
+  const zoomReset = () => setZoom(1);
 
+  const transparentColor = sheet?.frame?.transparentColor || null;
+  const transparentTolerance = sheet?.frame?.transparentTolerance ?? 0;
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !sheet?.src) return;
-    const img = new Image();
-    img.onload = () => {
-      onSize?.({ width: img.width, height: img.height });
-      const ratio = Math.min(1, maxWidth / img.width);
-      canvas.width = img.width * ratio;
-      canvas.height = img.height * ratio;
+    let cancelled = false;
+    loadMaskedImage(sheet.src, transparentColor, transparentTolerance).then(entry => {
+      if (cancelled || !entry) return;
+      const img = entry.img;
+      onSize?.({ width: entry.width, height: entry.height });
+      const ratio = Math.min(1, maxWidth / entry.width);
+      canvas.width = entry.width * ratio;
+      canvas.height = entry.height * ratio;
       const ctx = canvas.getContext('2d');
       ctx.imageSmoothingEnabled = false;
-      // Dim the source so the overlay lines pop on light backgrounds.
+      // Subtle checker so transparent pixels are visible against the bg.
+      if (transparentColor) {
+        const sq = 8;
+        for (let y = 0; y < canvas.height; y += sq) {
+          for (let x = 0; x < canvas.width; x += sq) {
+            ctx.fillStyle = ((x / sq + y / sq) & 1) ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)';
+            ctx.fillRect(x, y, sq, sq);
+          }
+        }
+      }
       ctx.globalAlpha = dimImage ? 0.55 : 1;
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       ctx.globalAlpha = 1;
@@ -426,7 +423,7 @@ function SheetGridPreview({ sheet, maxWidth = 240, dimImage = true, onSize, onUp
       if (f.width && f.height && f.cols && f.rows) {
         const cellW = f.width * ratio;
         const cellH = f.height * ratio;
-        setRenderInfo({ ratio, cellW, cellH });
+        setRenderInfo({ ratio, cellW, cellH, canvasW: canvas.width, canvasH: canvas.height });
         const drawCellRect = (cx, cy) => {
           const origin = cellOrigin(f, cx, cy);
           const x = origin.x * ratio;
@@ -441,7 +438,11 @@ function SheetGridPreview({ sheet, maxWidth = 240, dimImage = true, onSize, onUp
         for (let r = 0; r < f.rows; r++) {
           for (let c = 0; c < f.cols; c++) drawCellRect(c, r);
         }
-        if (f.cols * f.rows > 1) {
+        // Frame index labels share visibility with the gap badges so the
+        // double-click toggle clears the whole overlay (helpful when the
+        // image background is what the user wants to read, e.g. picking
+        // the transparent color with the eyedropper).
+        if (f.cols * f.rows > 1 && badgesVisible) {
           ctx.font = 'bold 10px monospace';
           ctx.textBaseline = 'top';
           for (let r = 0; r < f.rows; r++) {
@@ -458,12 +459,14 @@ function SheetGridPreview({ sheet, maxWidth = 240, dimImage = true, onSize, onUp
           }
         }
       }
-    };
-    img.src = sheet.src;
-  }, [sheet?.src, sheet?.frame?.width, sheet?.frame?.height, sheet?.frame?.cols, sheet?.frame?.rows,
+    });
+    return () => { cancelled = true; };
+  }, [sheet?.src, transparentColor,
+      sheet?.frame?.width, sheet?.frame?.height, sheet?.frame?.cols, sheet?.frame?.rows,
       sheet?.frame?.offsetX, sheet?.frame?.offsetY, sheet?.frame?.offsetLeft, sheet?.frame?.offsetTop,
       JSON.stringify(sheet?.frame?.gapX), JSON.stringify(sheet?.frame?.gapY),
-      maxWidth, dimImage, onSize]);
+      sheet?.frame?.transparentTolerance,
+      badgesVisible, maxWidth, dimImage, onSize]);
 
   // Render gap badges on top of the canvas. Positioned at the midpoint of
   // each gap segment so they hover between cells. Visible only when there
@@ -471,7 +474,7 @@ function SheetGridPreview({ sheet, maxWidth = 240, dimImage = true, onSize, onUp
   const f = sheet?.frame || {};
   const cols = f.cols || 0;
   const rows = f.rows || 0;
-  const canEdit = !!onUpdateFrame && renderInfo;
+  const canEdit = !!onUpdateFrame && renderInfo && badgesVisible;
   const xBadges = [];
   const yBadges = [];
   if (canEdit) {
@@ -480,11 +483,12 @@ function SheetGridPreview({ sheet, maxWidth = 240, dimImage = true, onSize, onUp
       for (let r = 0; r < rows; r++) {
         for (let g = 0; g < cols - 1; g++) {
           const value = gapAt(f.gapX, r, g);
-          // Position the badge at the midpoint of the gap, vertically
-          // centered on the row.
           const cellEnd = cellOrigin(f, g, r);
-          const x = cellEnd.x * ratio + cellW + (value * ratio) / 2;
-          const y = cellEnd.y * ratio + cellH / 2;
+          // Badge positions live in displayed pixels — multiply the canvas-
+          // internal coordinates by the current zoom so badges align with
+          // the visually scaled image.
+          const x = (cellEnd.x * ratio + cellW + (value * ratio) / 2) * zoom;
+          const y = (cellEnd.y * ratio + cellH / 2) * zoom;
           xBadges.push(
             <GapBadge
               key={`x-${r}-${g}`}
@@ -502,8 +506,8 @@ function SheetGridPreview({ sheet, maxWidth = 240, dimImage = true, onSize, onUp
         for (let g = 0; g < rows - 1; g++) {
           const value = gapAt(f.gapY, c, g);
           const cellEnd = cellOrigin(f, c, g);
-          const x = cellEnd.x * ratio + cellW / 2;
-          const y = cellEnd.y * ratio + cellH + (value * ratio) / 2;
+          const x = (cellEnd.x * ratio + cellW / 2) * zoom;
+          const y = (cellEnd.y * ratio + cellH + (value * ratio) / 2) * zoom;
           yBadges.push(
             <GapBadge
               key={`y-${c}-${g}`}
@@ -518,19 +522,142 @@ function SheetGridPreview({ sheet, maxWidth = 240, dimImage = true, onSize, onUp
     }
   }
 
+  const canvasW = renderInfo?.canvasW || 0;
+  const canvasH = renderInfo?.canvasH || 0;
+  const canvasStyle = zoom === 1
+    ? { display: 'block', border: '1px solid var(--border)', imageRendering: 'pixelated', maxWidth: '100%' }
+    : { display: 'block', border: '1px solid var(--border)', imageRendering: 'pixelated', width: canvasW * zoom, height: canvasH * zoom, maxWidth: 'none' };
+
   return (
-    <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%' }}>
-      <canvas ref={canvasRef} style={{ display: 'block', border: '1px solid var(--border)', imageRendering: 'pixelated', maxWidth: '100%' }} />
-      {xBadges}
-      {yBadges}
+    <div style={{ display: 'block', maxWidth: '100%' }}>
+      {/* Zoom toolbar */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4,
+        fontSize: 10, color: 'var(--text-dim)', fontFamily: 'monospace',
+      }}>
+        <span style={{ marginRight: 4 }}>zoom</span>
+        <button type="button" className="small-btn" onClick={zoomOut} disabled={zoom <= ZOOM_STEPS[0]} title="Zoom out" style={{ minWidth: 24, padding: '0 6px' }}>−</button>
+        <button type="button" className="small-btn" onClick={zoomReset} title="Reset zoom" style={{ minWidth: 44, padding: '0 6px' }}>{Math.round(zoom * 100)}%</button>
+        <button type="button" className="small-btn" onClick={zoomIn} disabled={zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1]} title="Zoom in" style={{ minWidth: 24, padding: '0 6px' }}>+</button>
+        <span style={{ marginLeft: 'auto', opacity: 0.7 }}>
+          {onUpdateFrame ? 'dbl-click image to toggle gap editor' : ''}
+        </span>
+      </div>
+      <div
+        // Scrollable wrapper so zoomed-in canvases stay inside the panel
+        // instead of pushing the layout. Badges live INSIDE this wrapper so
+        // they scroll together with the image.
+        style={{
+          position: 'relative',
+          display: 'inline-block',
+          maxWidth: '100%',
+          maxHeight: 480,
+          overflow: zoom === 1 ? 'visible' : 'auto',
+          border: zoom !== 1 ? '1px dashed var(--border)' : 'none',
+        }}
+        onDoubleClick={() => onUpdateFrame && setBadgesVisible(v => !v)}
+        title={onUpdateFrame ? 'Double-click to toggle gap editor visibility' : ''}
+      >
+        <div style={{ position: 'relative', width: zoom !== 1 ? canvasW * zoom : 'auto', display: 'inline-block' }}>
+          <canvas
+            ref={canvasRef}
+            style={{ ...canvasStyle, cursor: isPicking ? 'crosshair' : (canvasStyle.cursor || 'default') }}
+            onClick={(e) => {
+              if (!isPicking || !onPickColor || !renderInfo) return;
+              const rect = canvasRef.current.getBoundingClientRect();
+              // Map click position back to source-image coordinates.
+              const cx = (e.clientX - rect.left) / rect.width;
+              const cy = (e.clientY - rect.top) / rect.height;
+              const sx = Math.floor(cx * renderInfo.canvasW / renderInfo.ratio);
+              const sy = Math.floor(cy * renderInfo.canvasH / renderInfo.ratio);
+              pickColorAt(sheet.src, sx, sy).then(color => onPickColor(color));
+            }}
+          />
+          {xBadges}
+          {yBadges}
+        </div>
+        {onUpdateFrame && !badgesVisible && (
+          <div style={{
+            position: 'sticky', top: 4, marginLeft: 4, display: 'inline-block',
+            padding: '2px 6px', fontSize: 9, fontFamily: 'monospace',
+            background: 'rgba(0,0,0,0.85)', color: 'var(--accent)',
+            border: '1px solid var(--accent)',
+            pointerEvents: 'none',
+          }}>
+            gap editor hidden · dbl-click to show
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Color-key transparency controls — a color input + eyedropper button. The
+// eyedropper toggles `picking` on the parent so the next click on the
+// SheetGridPreview resolves a color from that pixel.
+function TransparentColorControls({ value, onChange, tolerance = 0, onChangeTolerance, picking, onTogglePicker }) {
+  const safe = value || '';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          type="color"
+          value={safe || '#000000'}
+          onChange={e => onChange(e.target.value)}
+          title="Color treated as transparent"
+          style={{ width: 28, height: 22, padding: 0, border: '1px solid var(--border)', background: 'transparent', cursor: 'pointer' }}
+        />
+        <input
+          type="text"
+          value={safe}
+          placeholder="#rrggbb"
+          onChange={e => onChange(e.target.value)}
+          style={{ width: 80, fontFamily: 'monospace', fontSize: 11 }}
+        />
+        <button
+          type="button"
+          className="small-btn"
+          onClick={onTogglePicker}
+          title="Pick the color directly from the image"
+          style={{
+            background: picking ? 'var(--accent)' : 'transparent',
+            color: picking ? 'var(--bg)' : 'var(--accent)',
+            borderColor: 'var(--accent)',
+          }}
+        >{picking ? '◉ click image' : '◎ eyedropper'}</button>
+        {safe && (
+          <button
+            type="button"
+            className="small-btn"
+            onClick={() => onChange('')}
+            title="Disable color-key transparency"
+          >clear</button>
+        )}
+      </div>
+      {safe && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-dim)' }}>
+          <span style={{ minWidth: 60 }}>tolerance</span>
+          <input
+            type="range"
+            min={0}
+            max={64}
+            value={tolerance}
+            onChange={e => onChangeTolerance(parseInt(e.target.value, 10) || 0)}
+            style={{ flex: 1 }}
+            title="How close a pixel color has to be to count as the transparent color. Useful for anti-aliased edges."
+          />
+          <span style={{ minWidth: 24, textAlign: 'right', color: 'var(--accent)' }}>±{tolerance}</span>
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Sprite sheets tab ───────────────────────────────────────────────────
-function SpriteSheetsTab({ sheets, onChange }) {
+function SpriteSheetsTab({ sheets, onChange, confirmDelete }) {
   const [selectedId, setSelectedId] = useState(sheets[0]?.id || null);
   const [sourceSize, setSourceSize] = useState(null);
+  const [picking, setPicking] = useState(false);
   const selected = sheets.find(s => s.id === selectedId) || null;
 
   const importSheet = async (file) => {
@@ -558,9 +685,15 @@ function SpriteSheetsTab({ sheets, onChange }) {
     onChange(prev => prev.map(s => s.id === id ? { ...s, frame: { ...(s.frame || {}), ...patch } } : s));
   };
   const removeSheet = (id) => {
-    if (!confirm('Delete this sprite sheet? It will be removed from all entities that reference it.')) return;
-    onChange(prev => prev.filter(s => s.id !== id));
-    if (selectedId === id) setSelectedId(null);
+    const target = sheets.find(s => s.id === id);
+    confirmDelete(
+      'Delete sprite sheet',
+      `Delete "${target?.name || 'this sheet'}"? Any entity referencing it will lose its sprite.`,
+      () => {
+        onChange(prev => prev.filter(s => s.id !== id));
+        if (selectedId === id) setSelectedId(null);
+      }
+    );
   };
 
   const addAnimation = (sheetId) => {
@@ -627,15 +760,46 @@ function SpriteSheetsTab({ sheets, onChange }) {
         )}
         {selected && (
           <>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 4 }}>
+              <div className="property-group" style={{ flex: '1 1 0', margin: 0 }}>
+                <label>NAME</label>
+                <input type="text" value={selected.name} onChange={e => updateSheet(selected.id, { name: e.target.value })} />
+              </div>
+              <label
+                className="small-btn"
+                style={{ cursor: 'pointer', whiteSpace: 'nowrap', flex: '0 0 auto' }}
+                title="Replace the source image — all frame config and animations are preserved"
+              >
+                ↩ Replace image
+                <input
+                  type="file" accept="image/png,image/jpeg" style={{ display: 'none' }}
+                  onChange={async (e) => {
+                    if (!e.target.files?.[0]) return;
+                    const src = await readFileAsDataUrl(e.target.files[0]);
+                    updateSheet(selected.id, { src });
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            </div>
             <div className="property-group">
-              <label>NAME</label>
-              <input type="text" value={selected.name} onChange={e => updateSheet(selected.id, { name: e.target.value })} />
+              <label>TRANSPARENT COLOR (legacy PNGs without alpha)</label>
+              <TransparentColorControls
+                value={selected.frame?.transparentColor || ''}
+                onChange={v => updateFrame(selected.id, { transparentColor: v || null })}
+                tolerance={selected.frame?.transparentTolerance ?? 0}
+                onChangeTolerance={n => updateFrame(selected.id, { transparentTolerance: n })}
+                picking={picking}
+                onTogglePicker={() => setPicking(p => !p)}
+              />
             </div>
             <SheetGridPreview
               sheet={selected}
               maxWidth={420}
               onSize={setSourceSize}
               onUpdateFrame={(patch) => updateFrame(selected.id, patch)}
+              isPicking={picking}
+              onPickColor={(color) => { updateFrame(selected.id, { transparentColor: color }); setPicking(false); }}
             />
             {sourceSize && (() => {
               const f = selected.frame;
@@ -774,7 +938,16 @@ function SpriteSheetsTab({ sheets, onChange }) {
 }
 
 // ─── Tilesets tab ────────────────────────────────────────────────────────
-function TilesetsTab({ tilesets, onChange }) {
+// Mirrors the Sprite editor (sidebar + detail with grid preview, inline
+// gap badges, offsets, etc.) since the only material difference is "no
+// animations". Tilesets store fields at the top level; we wrap them in a
+// fake `frame` shape when handing them to SheetGridPreview / NumericInput.
+function TilesetsTab({ tilesets, onChange, confirmDelete }) {
+  const [selectedId, setSelectedId] = useState(tilesets[0]?.id || null);
+  const [sourceSize, setSourceSize] = useState(null);
+  const [picking, setPicking] = useState(false);
+  const selected = tilesets.find(t => t.id === selectedId) || null;
+
   const importTileset = async (file) => {
     const src = await readFileAsDataUrl(file);
     const id = mkId();
@@ -783,65 +956,283 @@ function TilesetsTab({ tilesets, onChange }) {
       name: file.name.replace(/\.[^.]+$/, ''),
       src,
       tileWidth: 32, tileHeight: 32, cols: 1, rows: 1,
+      offsetLeft: 0, offsetTop: 0, gapX: 0, gapY: 0,
     }]);
+    setSelectedId(id);
   };
 
   const updateTileset = (id, patch) => {
     onChange(prev => prev.map(t => t.id === id ? { ...t, ...patch } : t));
   };
   const removeTileset = (id) => {
-    if (!confirm('Delete this tileset? Levels referencing it will lose their tile graphics.')) return;
-    onChange(prev => prev.filter(t => t.id !== id));
+    const target = tilesets.find(t => t.id === id);
+    confirmDelete(
+      'Delete tileset',
+      `Delete "${target?.name || 'this tileset'}"? Any level using it will lose its tile graphics.`,
+      () => {
+        onChange(prev => prev.filter(t => t.id !== id));
+        if (selectedId === id) setSelectedId(null);
+      }
+    );
+  };
+
+  // Wrap a tileset in the SpriteSheet `frame` shape so SheetGridPreview
+  // can render its grid and edit gaps inline.
+  const fakeSheetFor = (t) => ({
+    src: t.src,
+    frame: {
+      width: t.tileWidth, height: t.tileHeight,
+      cols: t.cols, rows: t.rows,
+      offsetLeft: t.offsetLeft ?? 0, offsetTop: t.offsetTop ?? 0,
+      gapX: t.gapX ?? 0, gapY: t.gapY ?? 0,
+      transparentColor: t.transparentColor ?? null,
+    },
+  });
+  // Translate the `frame` patch sent by SheetGridPreview into the tileset's
+  // top-level field names.
+  const patchFrame = (id, framePatch) => {
+    const flat = {};
+    const keyMap = { width: 'tileWidth', height: 'tileHeight' };
+    for (const [k, v] of Object.entries(framePatch)) {
+      flat[keyMap[k] || k] = v;
+    }
+    updateTileset(id, flat);
   };
 
   return (
+    <div style={{ display: 'flex', gap: 12, height: '100%', minHeight: 320, minWidth: 0 }}>
+      {/* Sidebar list */}
+      <div style={{ width: 180, flex: '0 0 180px', borderRight: '1px solid var(--border)', paddingRight: 8, overflowY: 'auto', overflowX: 'hidden' }}>
+        <label className="small-btn" style={{ display: 'block', textAlign: 'center', cursor: 'pointer', marginBottom: 8 }}>
+          + Import PNG
+          <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }}
+            onChange={e => { if (e.target.files?.[0]) { importTileset(e.target.files[0]); e.target.value = ''; } }} />
+        </label>
+        {tilesets.length === 0 && (
+          <div style={{ color: 'var(--text-dim)', fontSize: 10, textAlign: 'center', padding: 12 }}>
+            [ No tilesets ]
+          </div>
+        )}
+        {tilesets.map(t => (
+          <div
+            key={t.id}
+            onClick={() => setSelectedId(t.id)}
+            style={{
+              padding: '4px 6px', fontSize: 11, cursor: 'pointer',
+              background: selectedId === t.id ? 'var(--selected)' : 'transparent',
+              color: selectedId === t.id ? 'var(--accent)' : 'var(--text)',
+              border: '1px solid var(--border)', marginBottom: 2,
+            }}
+          >{t.name}</div>
+        ))}
+      </div>
+
+      {/* Detail */}
+      <div style={{ flex: '1 1 0', minWidth: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+        {!selected && (
+          <div style={{ color: 'var(--text-dim)', fontSize: 11, textAlign: 'center', padding: 24 }}>
+            Select or import a tileset to begin. Tilesets are the source for paintable tiles in Levels.
+          </div>
+        )}
+        {selected && (
+          <>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 4 }}>
+              <div className="property-group" style={{ flex: '1 1 0', margin: 0 }}>
+                <label>NAME</label>
+                <input type="text" value={selected.name}
+                  onChange={e => updateTileset(selected.id, { name: e.target.value })} />
+              </div>
+              <label
+                className="small-btn"
+                style={{ cursor: 'pointer', whiteSpace: 'nowrap', flex: '0 0 auto' }}
+                title="Replace the source image — all tile config is preserved"
+              >
+                ↩ Replace image
+                <input
+                  type="file" accept="image/png,image/jpeg" style={{ display: 'none' }}
+                  onChange={async (e) => {
+                    if (!e.target.files?.[0]) return;
+                    const src = await readFileAsDataUrl(e.target.files[0]);
+                    updateTileset(selected.id, { src });
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            </div>
+            <div className="property-group">
+              <label>TRANSPARENT COLOR (legacy PNGs without alpha)</label>
+              <TransparentColorControls
+                value={selected.transparentColor || ''}
+                onChange={v => updateTileset(selected.id, { transparentColor: v || null })}
+                tolerance={selected.transparentTolerance ?? 0}
+                onChangeTolerance={n => updateTileset(selected.id, { transparentTolerance: n })}
+                picking={picking}
+                onTogglePicker={() => setPicking(p => !p)}
+              />
+            </div>
+            <SheetGridPreview
+              sheet={fakeSheetFor(selected)}
+              maxWidth={420}
+              onSize={setSourceSize}
+              onUpdateFrame={(framePatch) => patchFrame(selected.id, framePatch)}
+              isPicking={picking}
+              onPickColor={(color) => { updateTileset(selected.id, { transparentColor: color }); setPicking(false); }}
+            />
+            {sourceSize && (() => {
+              const view = fakeSheetFor(selected).frame;
+              const right = cellOriginInline(view, view.cols - 1, 0).x + view.tileWidth;
+              const bottom = cellOriginInline(view, 0, view.rows - 1).y + view.tileHeight;
+              const fits = right <= sourceSize.width && bottom <= sourceSize.height;
+              return (
+                <div style={{ fontSize: 10, color: fits ? 'var(--text-dim)' : '#ff9966', marginTop: 4 }}>
+                  Source PNG: {sourceSize.width}×{sourceSize.height}px · grid covers {right}×{bottom}px
+                  {!fits && ' ⚠ exceeds source — adjust cells/offsets/gaps'}
+                </div>
+              );
+            })()}
+
+            <div style={{ marginTop: 8 }} className="al-section-title">TILE GRID (source pixels)</div>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4 }}>
+              GAP X/Y, OFFSET LEFT/TOP accept a number or a comma-list — e.g. <code style={{ color: 'var(--accent)' }}>10,12,8</code>. Click any gap badge on the image to edit it inline.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4 }}>
+              <div className="property-group">
+                <label>OFFSET LEFT</label>
+                <GapInput value={selected.offsetLeft ?? 0}
+                  onCommit={v => updateTileset(selected.id, { offsetLeft: v })} />
+              </div>
+              <div className="property-group">
+                <label>OFFSET TOP</label>
+                <GapInput value={selected.offsetTop ?? 0}
+                  onCommit={v => updateTileset(selected.id, { offsetTop: v })} />
+              </div>
+              <div className="property-group">
+                <label>TILE W</label>
+                <NumericInput min={1} value={selected.tileWidth ?? 32}
+                  onCommit={n => updateTileset(selected.id, { tileWidth: n })} />
+              </div>
+              <div className="property-group">
+                <label>TILE H</label>
+                <NumericInput min={1} value={selected.tileHeight ?? 32}
+                  onCommit={n => updateTileset(selected.id, { tileHeight: n })} />
+              </div>
+              <div className="property-group">
+                <label>COLS</label>
+                <NumericInput min={1} value={selected.cols ?? 1}
+                  onCommit={n => updateTileset(selected.id, { cols: n })} />
+              </div>
+              <div className="property-group">
+                <label>ROWS</label>
+                <NumericInput min={1} value={selected.rows ?? 1}
+                  onCommit={n => updateTileset(selected.id, { rows: n })} />
+              </div>
+              <div className="property-group">
+                <label>GAP X</label>
+                <GapInput value={selected.gapX ?? 0}
+                  onCommit={v => updateTileset(selected.id, { gapX: v })} />
+              </div>
+              <div className="property-group">
+                <label>GAP Y</label>
+                <GapInput value={selected.gapY ?? 0}
+                  onCommit={v => updateTileset(selected.id, { gapY: v })} />
+              </div>
+            </div>
+
+            <div className="property-divider" />
+            <button
+              className="small-btn"
+              onClick={() => removeTileset(selected.id)}
+              style={{ color: '#ff5566', borderColor: '#ff5566' }}
+            >delete tileset</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Inline cellOrigin used only by TilesetsTab's coverage indicator. Keeps
+// SpriteSheetManager free of cross-file imports for a tiny utility.
+function cellOriginInline(frame, col, row) {
+  const offLeft = Array.isArray(frame.offsetLeft) ? Number(frame.offsetLeft[row]) || 0 : Number(frame.offsetLeft) || 0;
+  const offTop  = Array.isArray(frame.offsetTop)  ? Number(frame.offsetTop[col])  || 0 : Number(frame.offsetTop)  || 0;
+  const gapPick = (g, axisIdx, gapIdx) => {
+    if (Array.isArray(g)) {
+      if (Array.isArray(g[0])) return Number(g[axisIdx]?.[gapIdx]) || 0;
+      return Number(g[gapIdx]) || 0;
+    }
+    return Number(g) || 0;
+  };
+  let x = offLeft;
+  for (let i = 0; i < col; i++) x += frame.width + gapPick(frame.gapX, row, i);
+  let y = offTop;
+  for (let i = 0; i < row; i++) y += frame.height + gapPick(frame.gapY, col, i);
+  return { x, y };
+}
+
+// ─── Backgrounds tab ─────────────────────────────────────────────────────
+// Backgrounds are full images (PNG/JPG/GIF) used as parallax layers in
+// Levels. No grid configuration — they're consumed whole.
+function BackgroundsTab({ backgrounds, onChange, confirmDelete }) {
+  const importBg = async (file) => {
+    const src = await readFileAsDataUrl(file);
+    onChange(prev => [...prev, {
+      id: mkId(), kind: 'background',
+      name: file.name.replace(/\.[^.]+$/, ''),
+      src,
+    }]);
+  };
+  const updateBg = (id, patch) => onChange(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
+  const removeBg = (id) => {
+    const target = backgrounds.find(b => b.id === id);
+    confirmDelete(
+      'Delete background',
+      `Delete "${target?.name || 'this background'}"? Any level layer using it will lose its image.`,
+      () => onChange(prev => prev.filter(b => b.id !== id))
+    );
+  };
+  return (
     <div style={{ overflowY: 'auto', minHeight: 320 }}>
       <label className="small-btn" style={{ display: 'inline-block', cursor: 'pointer', marginBottom: 8 }}>
-        + Import Tileset PNG
-        <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.[0]) { importTileset(e.target.files[0]); e.target.value = ''; } }} />
+        + Import background
+        <input type="file" accept="image/*" style={{ display: 'none' }}
+          onChange={e => { if (e.target.files?.[0]) { importBg(e.target.files[0]); e.target.value = ''; } }} />
       </label>
-      {tilesets.length === 0 && (
+      {backgrounds.length === 0 && (
         <div style={{ color: 'var(--text-dim)', fontSize: 11, textAlign: 'center', padding: 24 }}>
-          [ No tilesets — TileMap (Phase 3) will use these ]
+          [ No backgrounds — Levels can stack these as parallax layers behind the tilemap ]
         </div>
       )}
-      {tilesets.map(t => (
-        <div key={t.id} style={{ border: '1px solid var(--border)', padding: 8, marginBottom: 6 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <SheetGridPreview sheet={{ src: t.src, frame: { width: t.tileWidth, height: t.tileHeight, cols: t.cols, rows: t.rows } }} maxWidth={160} />
-            <div style={{ flex: 1 }}>
-              <div className="property-group">
-                <label>NAME</label>
-                <input type="text" value={t.name} onChange={e => updateTileset(t.id, { name: e.target.value })} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-                <div className="property-group">
-                  <label>TILE W</label>
-                  <NumericInput min={1} value={t.tileWidth ?? 32}
-                    onCommit={n => updateTileset(t.id, { tileWidth: n })} />
-                </div>
-                <div className="property-group">
-                  <label>TILE H</label>
-                  <NumericInput min={1} value={t.tileHeight ?? 32}
-                    onCommit={n => updateTileset(t.id, { tileHeight: n })} />
-                </div>
-                <div className="property-group">
-                  <label>COLS</label>
-                  <NumericInput min={1} value={t.cols ?? 1}
-                    onCommit={n => updateTileset(t.id, { cols: n })} />
-                </div>
-                <div className="property-group">
-                  <label>ROWS</label>
-                  <NumericInput min={1} value={t.rows ?? 1}
-                    onCommit={n => updateTileset(t.id, { rows: n })} />
-                </div>
-              </div>
+      {backgrounds.map(b => (
+        <div key={b.id} style={{ border: '1px solid var(--border)', padding: 8, marginBottom: 6, display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
+          <img src={b.src} alt={b.name} style={{ width: 96, height: 64, objectFit: 'contain', background: 'rgba(0,0,0,0.4)', imageRendering: 'pixelated', flex: '0 0 96px' }} />
+          <div style={{ flex: '1 1 0', display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+            <div className="property-group" style={{ margin: 0 }}>
+              <label>NAME</label>
+              <input type="text" value={b.name} onChange={e => updateBg(b.id, { name: e.target.value })} />
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <label
+                className="small-btn"
+                style={{ cursor: 'pointer', alignSelf: 'flex-start' }}
+                title="Replace the image — name is preserved"
+              >
+                ↩ Replace
+                <input
+                  type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={async (e) => {
+                    if (!e.target.files?.[0]) return;
+                    const src = await readFileAsDataUrl(e.target.files[0]);
+                    updateBg(b.id, { src });
+                    e.target.value = '';
+                  }}
+                />
+              </label>
               <button
-            className="small-btn"
-            onClick={() => removeTileset(t.id)}
-            style={{ color: '#ff5566', borderColor: '#ff5566' }}
-          >delete</button>
+                className="small-btn"
+                onClick={() => removeBg(b.id)}
+                style={{ alignSelf: 'flex-start', color: '#ff5566', borderColor: '#ff5566' }}
+              >delete</button>
             </div>
           </div>
         </div>
@@ -851,15 +1242,19 @@ function TilesetsTab({ tilesets, onChange }) {
 }
 
 // ─── Sounds tab ──────────────────────────────────────────────────────────
-function SoundsTab({ sounds, onChange }) {
+function SoundsTab({ sounds, onChange, confirmDelete }) {
   const importSound = async (file) => {
     const src = await readFileAsDataUrl(file);
     onChange(prev => [...prev, { id: mkId(), kind: 'sound', name: file.name.replace(/\.[^.]+$/, ''), src }]);
   };
   const updateSound = (id, patch) => onChange(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
   const removeSound = (id) => {
-    if (!confirm('Delete this sound?')) return;
-    onChange(prev => prev.filter(s => s.id !== id));
+    const target = sounds.find(s => s.id === id);
+    confirmDelete(
+      'Delete sound',
+      `Delete "${target?.name || 'this sound'}"?`,
+      () => onChange(prev => prev.filter(s => s.id !== id))
+    );
   };
   return (
     <div style={{ overflowY: 'auto', minHeight: 320 }}>
@@ -874,8 +1269,11 @@ function SoundsTab({ sounds, onChange }) {
         </div>
       )}
       {sounds.map(s => (
-        <div key={s.id} style={{ border: '1px solid var(--border)', padding: 8, marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input type="text" value={s.name} onChange={e => updateSound(s.id, { name: e.target.value })} style={{ flex: 1 }} />
+        <div key={s.id} style={{ border: '1px solid var(--border)', padding: 8, marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
+          <div className="property-group" style={{ flex: 1, margin: 0, minWidth: 0 }}>
+            <label>NAME</label>
+            <input type="text" value={s.name} onChange={e => updateSound(s.id, { name: e.target.value })} />
+          </div>
           <audio src={s.src} controls style={{ height: 28 }} />
           <button
             className="small-btn"
@@ -889,11 +1287,12 @@ function SoundsTab({ sounds, onChange }) {
 }
 
 // ─── Modal shell ─────────────────────────────────────────────────────────
-export default function SpriteSheetManager({ assets, setAssets, onClose }) {
+export default function SpriteSheetManager({ assets, setAssets, onClose, setConfirmModal }) {
   const [tab, setTab] = useState('sprites');
   const counts = useMemo(() => ({
     sprites: (assets?.sprites || []).length,
     tilesets: (assets?.tilesets || []).length,
+    backgrounds: (assets?.backgrounds || []).length,
     sounds: (assets?.sounds || []).length,
   }), [assets]);
 
@@ -902,6 +1301,21 @@ export default function SpriteSheetManager({ assets, setAssets, onClose }) {
       ...prev,
       [slice]: typeof updater === 'function' ? updater(prev[slice] || []) : updater,
     }));
+  };
+
+  // Wrap a destructive action behind the project's design-system confirm
+  // modal. Falls back to native confirm only if the modal isn't wired (e.g.
+  // when the manager is mounted standalone for testing).
+  const confirmDelete = (title, message, onConfirm) => {
+    if (setConfirmModal) {
+      setConfirmModal({
+        title, message, confirmText: 'Delete',
+        onConfirm: () => { onConfirm(); setConfirmModal(null); },
+        onCancel: () => setConfirmModal(null),
+      });
+    } else if (window.confirm(message)) {
+      onConfirm();
+    }
   };
 
   return (
@@ -915,6 +1329,7 @@ export default function SpriteSheetManager({ assets, setAssets, onClose }) {
           {[
             ['sprites', `Sprites (${counts.sprites})`],
             ['tilesets', `Tilesets (${counts.tilesets})`],
+            ['backgrounds', `Backgrounds (${counts.backgrounds})`],
             ['sounds', `Sounds (${counts.sounds})`],
           ].map(([key, label]) => (
             <div
@@ -934,9 +1349,10 @@ export default function SpriteSheetManager({ assets, setAssets, onClose }) {
           ))}
         </div>
         <div style={{ flex: 1, overflow: 'hidden', padding: '12px 0 0 12px', minWidth: 0 }}>
-          {tab === 'sprites' && <SpriteSheetsTab sheets={assets?.sprites || []} onChange={updateSlice('sprites')} />}
-          {tab === 'tilesets' && <TilesetsTab tilesets={assets?.tilesets || []} onChange={updateSlice('tilesets')} />}
-          {tab === 'sounds' && <SoundsTab sounds={assets?.sounds || []} onChange={updateSlice('sounds')} />}
+          {tab === 'sprites' && <SpriteSheetsTab sheets={assets?.sprites || []} onChange={updateSlice('sprites')} confirmDelete={confirmDelete} />}
+          {tab === 'tilesets' && <TilesetsTab tilesets={assets?.tilesets || []} onChange={updateSlice('tilesets')} confirmDelete={confirmDelete} />}
+          {tab === 'backgrounds' && <BackgroundsTab backgrounds={assets?.backgrounds || []} onChange={updateSlice('backgrounds')} confirmDelete={confirmDelete} />}
+          {tab === 'sounds' && <SoundsTab sounds={assets?.sounds || []} onChange={updateSlice('sounds')} confirmDelete={confirmDelete} />}
         </div>
       </div>
     </div>

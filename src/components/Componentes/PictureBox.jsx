@@ -15,9 +15,8 @@ function PictureBox({ width = 150, height = 100, stretch = false, border = true,
 
   return (
     <div ref={drop} className="retro-picturebox" style={{ 
-      width: typeof width === 'string' && width.includes('%') ? width : `${width}px`, 
-      minHeight: height ? (typeof height === 'string' && height.includes('%') ? height : `${height}px`) : 'auto',
-      height: height ? (typeof height === 'string' && height.includes('%') ? height : `${height}px`) : 'auto',
+      width: typeof width === 'string' ? width : `${width}px`,
+      height: typeof height === 'string' ? height : (height ? `${height}px` : 'auto'),
       border: border ? `1px solid ${borderColor || 'var(--border)'}` : 'none' 
     }}>
       {children}

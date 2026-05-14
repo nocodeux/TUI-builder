@@ -219,21 +219,28 @@ function DraggableComponent({
 
   if (isWidthFill) {
     sizingStyle.flexGrow = 1;
-    sizingStyle.flexBasis = '0%';
+    sizingStyle.flexShrink = 1;
+    // Use flex-basis 0 (not 0%) so children's width:100% resolves against the
+    // computed (post-grow) width rather than the zero percentage baseline.
+    sizingStyle.flexBasis = 0;
     sizingStyle.minWidth = 0;
-    // Only stretch vertically if NOT in a row-direction layout (where it would force height)
-    // or if height is also fill.
     if (rowDirection === 'column' || isHeightFill) {
       sizingStyle.alignSelf = 'stretch';
     }
-  } else if (sizing?.widthMode === 'hug') {
+  } else if (isWidthHug) {
     sizingStyle.flexShrink = 0;
+    // Allow the wrapper to grow beyond the row's own width so hug-content
+    // items (especially buttons with long text) are never capped by a
+    // parent max-width constraint.
+    sizingStyle.maxWidth = 'none';
+    sizingStyle.overflow = 'visible';
   }
 
   if (isHeightFill) {
     sizingStyle.alignSelf = 'stretch';
     sizingStyle.flexGrow = 1;
     sizingStyle.minHeight = 0;
+    sizingStyle.flexDirection = 'column'; // so the child component can use height:100%
   }
 
   // Calculate padding based on drop indicator to create the "gap"
@@ -261,7 +268,9 @@ function DraggableComponent({
         position: 'relative',
         opacity: isDragging ? 0.3 : 1,
         cursor: isDragging ? 'grabbing' : 'grab',
-        display: (isWidthFill || isHeightFill) ? 'flex' : 'inline-flex',
+        // block when only width-fill so child width:100% resolves in a block context;
+        // flex when height-fill (needs flex-direction:column for height:100% child).
+        display: isHeightFill ? 'flex' : isWidthFill ? 'block' : 'inline-flex',
         transition: 'padding 0.15s ease-out', // Smooth transition for the gap
         ...sizingStyle,
         ...wrapperPadding,
@@ -338,8 +347,8 @@ function DraggableComponent({
         id={comp.id}
         selected={selectedIds && selectedIds.includes(comp.id)}
         // Pass override sizing to the component
-        width={isWidthFill ? '100%' : (isWidthHug ? 'auto' : (comp.props.width || 'auto'))}
-        height={isHeightFill ? '100%' : (isHeightHug ? 'auto' : (comp.props.height || 'auto'))}
+        width={isWidthFill ? '100%' : (isWidthHug ? 'auto' : (comp.props.width != null && comp.props.width !== '' ? comp.props.width : 'auto'))}
+        height={isHeightFill ? '100%' : (isHeightHug ? 'auto' : (comp.props.height != null && comp.props.height !== '' ? comp.props.height : 'auto'))}
         database={database}
         onSaveRecord={onSaveRecord}
         // If Table and bound to database, override rows
@@ -448,8 +457,11 @@ function LayoutRow({
         justifyContent: layout.justify,
         flexWrap: layout.wrap ? 'wrap' : 'nowrap',
         width: row.props?.sizing?.widthMode === 'hug' ? 'fit-content' : '100%',
-        height: row.props?.sizing?.heightMode === 'hug' ? 'auto' : (row.props?.sizing?.heightMode === 'fill' ? '100%' : 'auto'),
-        minHeight: 32,
+        // Use flex:1 (not height:100%) so fill works inside a flex-column parent.
+        ...(row.props?.sizing?.heightMode === 'fill'
+          ? { flex: '1 1 0', minHeight: 0 }
+          : { minHeight: 32 }),
+        height: row.props?.sizing?.heightMode === 'hug' ? 'auto' : undefined,
         ...padding,
         border: isRowSelected ? '1px dashed var(--accent)' : '1px dashed transparent',
         borderRadius: 2,

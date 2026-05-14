@@ -209,8 +209,10 @@ body {
 }
 
 .preview-area {
+  height: 100%;
   min-height: 100%;
   padding: 20px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -343,8 +345,10 @@ body {
   pointer-events: none;
 }
 
+/* Don't cap children — hug-content wrappers need to grow beyond their initial
+   flex-allocated width to fit long text, and fill wrappers use width:100%. */
 .component-wrapper > * {
-  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -630,6 +634,8 @@ body {
   border: 2px solid var(--border);
   background: var(--bg);
   margin: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .retro-window-titlebar {
@@ -652,7 +658,8 @@ body {
   align-items: flex-start;
   gap: 8px;
   padding: 12px;
-  min-height: 40px;
+  flex: 1 1 0;
+  min-height: 0;
   border-bottom: 1px dashed transparent;
   transition: border-color 0.2s;
 }

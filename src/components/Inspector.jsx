@@ -8,10 +8,110 @@
  * - Justify content (main-axis)
  * - Wrap
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import IconPicker from './IconPicker';
+import { resolveTilesetView, cellOrigin, listTileSources } from '../lib/tilesetView';
+import { NumericInput } from '../lib/inputs';
+import { loadMaskedImage } from '../lib/imageMask';
 
 const mkId = () => Math.random().toString(36).substring(2, 9);
+
+// ─── Tile palette ─────────────────────────────────────────────────────────
+// Renders each cell of the active tileset as a clickable swatch. Selecting
+// arms a paint brush; the LevelCanvas reads the brush and paints on click.
+function TileSwatch({ tileset, cellIndex, size, isSelected, onPick }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas || !tileset?.src) return;
+    const img = new Image();
+    img.onload = () => {
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, size, size);
+      const cols = Math.max(1, tileset.cols || 1);
+      const col = cellIndex % cols;
+      const row = Math.floor(cellIndex / cols);
+      const { x: sx, y: sy } = cellOrigin(tileset, col, row);
+      // Letterbox the tile inside the swatch while preserving aspect.
+      const aspect = tileset.tileWidth / tileset.tileHeight;
+      let dw = size, dh = size;
+      if (aspect > 1) dh = size / aspect; else dw = size * aspect;
+      const dx = (size - dw) / 2;
+      const dy = (size - dh) / 2;
+      ctx.drawImage(img, sx, sy, tileset.tileWidth, tileset.tileHeight, dx, dy, dw, dh);
+    };
+    img.src = tileset.src;
+  }, [tileset?.src, cellIndex, size, tileset?.cols, tileset?.tileWidth, tileset?.tileHeight,
+      JSON.stringify(tileset?.gapX), JSON.stringify(tileset?.gapY),
+      JSON.stringify(tileset?.offsetLeft), JSON.stringify(tileset?.offsetTop)]);
+  return (
+    <canvas
+      ref={ref}
+      width={size} height={size}
+      onClick={() => onPick(cellIndex)}
+      title={`tile #${cellIndex}`}
+      style={{
+        display: 'block', cursor: 'pointer', imageRendering: 'pixelated',
+        background: 'rgba(0,0,0,0.4)',
+        border: isSelected ? '2px solid var(--accent)' : '1px solid var(--border)',
+        outline: 'none', padding: 0, margin: 0,
+      }}
+    />
+  );
+}
+
+function TilePalette({ tileset, brush, layerId, onSetBrush }) {
+  if (!tileset) return null;
+  const total = (tileset.cols || 1) * (tileset.rows || 1);
+  const SWATCH = 32;
+  const isEraser = brush?.layerId === layerId && brush?.tileValue === 0;
+  return (
+    <div>
+      <div style={{
+        display: 'grid', gridTemplateColumns: `repeat(auto-fill, ${SWATCH + 2}px)`,
+        gap: 2, padding: 2, background: 'rgba(0,0,0,0.25)',
+        border: '1px solid var(--border)', maxHeight: 200, overflowY: 'auto',
+      }}>
+        {Array.from({ length: total }, (_, i) => {
+          const tileValue = i + 1; // 0 reserved for empty/eraser
+          const isSelected = brush?.layerId === layerId && brush?.tileValue === tileValue;
+          return (
+            <TileSwatch
+              key={i}
+              tileset={tileset}
+              cellIndex={i}
+              size={SWATCH}
+              isSelected={isSelected}
+              onPick={() => onSetBrush(isSelected ? null : { layerId, tileValue })}
+            />
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+        <button
+          type="button"
+          className="small-btn"
+          onClick={() => onSetBrush(isEraser ? null : { layerId, tileValue: 0 })}
+          style={{
+            flex: 1,
+            background: isEraser ? '#ff5566' : 'transparent',
+            color: isEraser ? 'var(--bg)' : '#ff8899',
+            borderColor: '#ff5566',
+          }}
+        >{isEraser ? '◉ erasing — click to disarm' : '⌫ eraser'}</button>
+        {brush && !isEraser && (
+          <button
+            type="button"
+            className="small-btn"
+            onClick={() => onSetBrush(null)}
+            title="Clear brush"
+          >× disarm</button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ─── Panel AutoLayout (solo para filas) ──────────────────────────────────────
 function AutoLayoutPanel({ layout = {}, onUpdate }) {
@@ -143,6 +243,272 @@ function AutoLayoutPanel({ layout = {}, onUpdate }) {
   );
 }
 
+// Nullable numeric input — empty string means "no override" (null).
+// Used for per-animation-slot renderH and spriteOffsetY overrides.
+function NullNumInput({ value, placeholder, onCommit, style }) {
+  const [draft, setDraft] = React.useState(value != null ? String(value) : '');
+  React.useEffect(() => { setDraft(value != null ? String(value) : ''); }, [value]);
+  const commit = () => {
+    const s = draft.trim();
+    if (s === '') { onCommit(null); return; }
+    const n = parseInt(s, 10);
+    if (!Number.isNaN(n)) { onCommit(n); } else { setDraft(value != null ? String(value) : ''); }
+  };
+  return (
+    <input
+      type="text" inputMode="numeric"
+      value={draft}
+      placeholder={placeholder}
+      onChange={e => { if (/^-?\d*$/.test(e.target.value)) setDraft(e.target.value); }}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === 'Enter') { commit(); e.target.blur(); } }}
+      style={style}
+    />
+  );
+}
+
+// Overlay preview: draws the idle ghost + the slot's live animation on a canvas
+// so the user can compare size/position side-by-side without leaving the inspector.
+function SlotOverlayPreview({ entity, slot, assets }) {
+  const canvasRef = useRef(null);
+  const idleImgRef = useRef(null);
+  const slotImgRef = useRef(null);
+  const [frame, setFrame] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+
+  const sprites = assets?.sprites || [];
+  const defaultSlot = (entity.animations || []).find(a => a.name === entity.defaultAnimation) || null;
+  const isDefaultSlot = defaultSlot?.id === slot.id;
+  const defaultSheet  = isDefaultSlot ? null : sprites.find(s => s.id === defaultSlot?.spriteSheetId) || null;
+  const defaultAnimDef = defaultSheet ? (defaultSheet.animations || []).find(a => a.name === defaultSlot?.animName) || null : null;
+  const slotSheet   = sprites.find(s => s.id === slot.spriteSheetId) || null;
+  const slotAnimDef = slotSheet ? (slotSheet.animations || []).find(a => a.name === slot.animName) || null : null;
+
+  // Load both images whenever sheets change.
+  useEffect(() => {
+    let cancelled = false;
+    setLoaded(false);
+    idleImgRef.current = null;
+    slotImgRef.current = null;
+    const loads = [];
+    if (defaultSheet?.src) {
+      loads.push(
+        loadMaskedImage(defaultSheet.src, defaultSheet.frame?.transparentColor || null, defaultSheet.frame?.transparentTolerance || 0)
+          .then(e => { if (!cancelled && e) idleImgRef.current = e.img; })
+      );
+    }
+    if (slotSheet?.src) {
+      loads.push(
+        loadMaskedImage(slotSheet.src, slotSheet.frame?.transparentColor || null, slotSheet.frame?.transparentTolerance || 0)
+          .then(e => { if (!cancelled && e) slotImgRef.current = e.img; })
+      );
+    }
+    Promise.all(loads).then(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [defaultSheet?.id, slotSheet?.id]);
+
+  // Cycle the slot animation frames.
+  useEffect(() => {
+    const frames = slotAnimDef?.frames || [];
+    if (frames.length <= 1) { setFrame(0); return; }
+    const fps = Math.max(1, slotAnimDef.fps || 6);
+    setFrame(0);
+    const id = setInterval(() => setFrame(f => (f + 1) % frames.length), 1000 / fps);
+    return () => clearInterval(id);
+  }, [slotAnimDef?.frames?.length, slotAnimDef?.fps]);
+
+  // Redraw canvas whenever anything changes.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !loaded) return;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const PH = canvas.height;
+    const PW = canvas.width;
+    ctx.clearRect(0, 0, PW, PH);
+
+    const entityRenderH = entity.renderSize?.height || 64;
+
+    const drawLayer = (sheet, animDef, imgEl, frameIdx, renderH, offY, alpha) => {
+      if (!imgEl || !animDef?.frames?.length || !sheet?.frame) return;
+      const f = sheet.frame;
+      const fi = animDef.frames[Math.min(frameIdx, animDef.frames.length - 1)] ?? 0;
+      const cols = Math.max(1, f.cols || 1);
+      const view = {
+        tileWidth: f.width, tileHeight: f.height,
+        cols: f.cols, rows: f.rows,
+        offsetLeft: f.offsetLeft ?? f.offsetX ?? 0,
+        offsetTop:  f.offsetTop  ?? f.offsetY ?? 0,
+        gapX: f.gapX, gapY: f.gapY,
+      };
+      const { x: sx, y: sy } = cellOrigin(view, fi % cols, Math.floor(fi / cols));
+      const fw = f.width, fh = f.height;
+      const dh = renderH;
+      const dw = Math.round(fw * (renderH / fh));
+      const px = Math.round((PW - dw) / 2);
+      const py = PH - dh - offY;
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(imgEl, sx, sy, fw, fh, px, py, dw, dh);
+      ctx.globalAlpha = 1;
+    };
+
+    // Ghost layer — idle / default animation dimmed
+    if (!isDefaultSlot && defaultAnimDef && idleImgRef.current) {
+      const idleH   = defaultSlot?.renderH != null ? defaultSlot.renderH : entityRenderH;
+      const idleOff = defaultSlot?.spriteOffsetY != null ? defaultSlot.spriteOffsetY : (entity.spriteOffsetY || 0);
+      drawLayer(defaultSheet, defaultAnimDef, idleImgRef.current, 0, idleH, idleOff, 0.35);
+    }
+
+    // Active layer — slot animation at full opacity
+    if (slotAnimDef && slotImgRef.current) {
+      const slotH   = slot.renderH != null ? slot.renderH : entityRenderH;
+      const slotOff = slot.spriteOffsetY != null ? slot.spriteOffsetY : (entity.spriteOffsetY || 0);
+      drawLayer(slotSheet, slotAnimDef, slotImgRef.current, frame, slotH, slotOff, 1.0);
+    }
+
+    // Ground line
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, PH - 0.5);
+    ctx.lineTo(PW, PH - 0.5);
+    ctx.stroke();
+  }, [loaded, frame, isDefaultSlot,
+      slot.renderH, slot.spriteOffsetY,
+      entity.renderSize?.height, entity.spriteOffsetY,
+      defaultSlot?.renderH, defaultSlot?.spriteOffsetY]);
+
+  const PH = Math.min(128, Math.max(64, entity.renderSize?.height ?? 64));
+  const PW = Math.round(PH * 2.2);
+
+  if (!slotSheet || !slotAnimDef) return null;
+
+  return (
+    <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+      <canvas
+        ref={canvasRef}
+        width={PW} height={PH}
+        style={{
+          display: 'block', imageRendering: 'pixelated',
+          background: 'rgba(0,0,0,0.55)',
+          border: '1px solid var(--border)',
+        }}
+      />
+      <div style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'monospace' }}>
+        {!isDefaultSlot && defaultAnimDef
+          ? `ghost = ${defaultSlot?.name || 'idle'} · active = ${slot.name}`
+          : `preview = ${slot.name}`}
+      </div>
+    </div>
+  );
+}
+
+// ─── Attack slot (behavior accordion item) ────────────────────────────────────
+function AttackSlot({ attack, allAttacks, animSlots, expanded, onToggle, onChange, onRemove }) {
+  const btnBase = { background: 'transparent', border: 'none', color: 'var(--text-dim)', fontSize: 11, lineHeight: 1, cursor: 'pointer', padding: '0 2px', flexShrink: 0 };
+  return (
+    <div style={{ border: '1px solid var(--border)', marginBottom: 3, borderRadius: 2 }}>
+      <div onClick={onToggle} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 6px', cursor: 'pointer', userSelect: 'none', background: 'rgba(0,0,0,0.2)' }}>
+        <span style={{ fontSize: 9, color: 'var(--text-dim)', width: 8, flexShrink: 0 }}>{expanded ? '▼' : '▶'}</span>
+        <span style={{ flex: 1, fontSize: 10, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {attack.name || '(unnamed)'}
+        </span>
+        <span style={{ fontSize: 9, color: 'var(--text-dim)', flexShrink: 0 }}>
+          {attack.anim || '—'} · {attack.damage ?? 25}dmg{attack.comboNext ? ' →' : ''}
+        </span>
+        <button type="button" onClick={e => { e.stopPropagation(); onRemove(); }} style={btnBase}>×</button>
+      </div>
+      {expanded && (
+        <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div className="property-group" style={{ margin: 0 }}>
+            <label>NAME</label>
+            <input type="text" value={attack.name || ''} onChange={e => onChange({ name: e.target.value })} style={{ fontFamily: 'monospace', fontSize: 10 }} />
+          </div>
+          <div className="property-group" style={{ margin: 0 }}>
+            <label title="Animation slot to play during this attack.">ANIM</label>
+            <select value={attack.anim || ''} onChange={e => onChange({ anim: e.target.value || null })}>
+              <option value="">— none —</option>
+              {animSlots.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+            <div className="property-group" style={{ margin: 0 }}>
+              <label title="Damage dealt to the target on a successful hit.">DAMAGE</label>
+              <NumericInput min={0} value={attack.damage ?? 25} onCommit={n => onChange({ damage: n })} />
+            </div>
+            <div className="property-group" style={{ margin: 0 }}>
+              <label title="Milliseconds the attack animation locks movement.">DURATION (ms)</label>
+              <NumericInput min={50} value={attack.duration ?? 400} onCommit={n => onChange({ duration: n })} />
+            </div>
+            <div className="property-group" style={{ margin: 0 }}>
+              <label title="Pixel distance in front of the character that the hit detects. Leave blank to auto (1.8× character width).">REACH (px)</label>
+              <NumericInput min={1} value={attack.reach ?? ''} placeholder="auto"
+                onCommit={n => onChange({ reach: n > 0 ? n : null })} />
+            </div>
+          </div>
+          <div className="property-group" style={{ margin: 0 }}>
+            <label title="Press attack again during the combo window to chain into this next attack.">NEXT IN COMBO</label>
+            <select value={attack.comboNext || ''} onChange={e => onChange({ comboNext: e.target.value || null })}>
+              <option value="">— end of combo —</option>
+              {allAttacks.filter(a => a.id !== attack.id).map(a => (
+                <option key={a.id} value={a.id}>{a.name || '(unnamed)'}</option>
+              ))}
+            </select>
+          </div>
+          {attack.comboNext && (
+            <div className="property-group" style={{ margin: 0 }}>
+              <label title="Time in ms after the attack ends where pressing attack again chains to the next.">COMBO WINDOW (ms)</label>
+              <NumericInput min={50} value={attack.comboWindow ?? 500} onCommit={n => onChange({ comboWindow: n })} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Idle slot (behavior accordion item) ─────────────────────────────────────
+function IdleSlot({ idle, animSlots, expanded, onToggle, onChange, onRemove }) {
+  const btnBase = { background: 'transparent', border: 'none', color: 'var(--text-dim)', fontSize: 11, lineHeight: 1, cursor: 'pointer', padding: '0 2px', flexShrink: 0 };
+  return (
+    <div style={{ border: '1px solid var(--border)', marginBottom: 3, borderRadius: 2 }}>
+      <div onClick={onToggle} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 6px', cursor: 'pointer', userSelect: 'none', background: 'rgba(0,0,0,0.2)' }}>
+        <span style={{ fontSize: 9, color: 'var(--text-dim)', width: 8, flexShrink: 0 }}>{expanded ? '▼' : '▶'}</span>
+        <span style={{ flex: 1, fontSize: 10, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {idle.name || '(unnamed)'}
+        </span>
+        <span style={{ fontSize: 9, color: 'var(--text-dim)', flexShrink: 0 }}>{idle.anim || '—'}</span>
+        <button type="button" onClick={e => { e.stopPropagation(); onRemove(); }} style={btnBase}>×</button>
+      </div>
+      {expanded && (
+        <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div className="property-group" style={{ margin: 0 }}>
+            <label>NAME</label>
+            <input type="text" value={idle.name || ''} onChange={e => onChange({ name: e.target.value })} style={{ fontFamily: 'monospace', fontSize: 10 }} />
+          </div>
+          <div className="property-group" style={{ margin: 0 }}>
+            <label title="Animation slot to play for this idle variation.">ANIM</label>
+            <select value={idle.anim || ''} onChange={e => onChange({ anim: e.target.value || null })}>
+              <option value="">— none —</option>
+              {animSlots.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+            <div className="property-group" style={{ margin: 0 }}>
+              <label title="Minimum seconds before cycling to another idle.">MIN (s)</label>
+              <NumericInput min={0.5} value={idle.minTime ?? 2} onCommit={n => onChange({ minTime: n })} />
+            </div>
+            <div className="property-group" style={{ margin: 0 }}>
+              <label title="Maximum seconds this idle plays before switching.">MAX (s)</label>
+              <NumericInput min={1} value={idle.maxTime ?? 6} onCommit={n => onChange({ maxTime: n })} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Inspector principal ──────────────────────────────────────────────────────
 function Inspector({
   component, isRow, onUpdate, onDelete, onDuplicate,
@@ -151,6 +517,9 @@ function Inspector({
   overlays = [],
   gameMode = false, selectedLevel = null, onUpdateLevel = () => {},
   selectedEntity = null, onUpdateEntity = () => {}, assets = null,
+  paintBrush = null, onSetPaintBrush = () => {},
+  onAddBackgroundLayer = () => {}, onUpdateBackgroundLayer = () => {},
+  onRemoveBackgroundLayer = () => {}, onMoveBackgroundLayer = () => {},
 }) {
   const selectedId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
   const [showIconPicker, setShowIconPicker] = useState(false);
@@ -160,6 +529,9 @@ function Inspector({
   // the entity. Default ON whenever an entity is selected so size edits
   // preserve the sprite's intrinsic aspect ratio by default.
   const [aspectLocked, setAspectLocked] = useState(true);
+  const [expandedSlots, setExpandedSlots] = useState(() => new Set());
+  const [expandedAttacks, setExpandedAttacks] = useState(() => new Set());
+  const [expandedIdles, setExpandedIdles] = useState(() => new Set());
   useEffect(() => {
     if (component) {
       const layoutProps = isRow
@@ -185,8 +557,10 @@ function Inspector({
   if (gameMode && selectedEntity) {
     const ent = selectedEntity;
     const sprites = assets?.sprites || [];
-    const sheet = sprites.find(s => s.id === ent.spriteSheetAssetId) || null;
-    const animations = sheet?.animations || [];
+    // Resolve the "primary" sheet for aspect-lock — use the defaultAnimation
+    // slot, or the first slot, or the legacy spriteSheetAssetId.
+    const defaultSlot = (ent.animations || []).find(a => a.name === ent.defaultAnimation) || (ent.animations || [])[0];
+    const defaultSheet = sprites.find(s => s.id === (defaultSlot?.spriteSheetId || ent.spriteSheetAssetId)) || null;
     return (
       <div className="inspector">
         <h3>[INSPECTOR]</h3>
@@ -215,35 +589,187 @@ function Inspector({
             <option value="prop">Prop</option>
           </select>
         </div>
+        {(ent.role === 'enemy') && (
+          <div className="property-group">
+            <label>ENEMY TYPE</label>
+            <select value={ent.enemyType || 'regular'}
+              onChange={e => onUpdateEntity(ent.id, { enemyType: e.target.value })}>
+              <option value="regular">Regular</option>
+              <option value="elite">Elite</option>
+              <option value="miniboss">Mini-boss</option>
+              <option value="boss">Boss</option>
+            </select>
+          </div>
+        )}
 
         <div className="property-divider" />
-        <div className="al-section-title">VISUAL</div>
-        <div className="property-group">
-          <label>SPRITE SHEET</label>
-          <select value={ent.spriteSheetAssetId || ''}
-            onChange={e => {
-              const newId = e.target.value || null;
-              const newSheet = sprites.find(s => s.id === newId);
-              // When a sprite is (re)assigned, snap renderSize to the frame's
-              // native pixel dimensions so the entity inherits the sprite's
-              // aspect ratio. The user can still resize freely after this.
-              const patch = { spriteSheetAssetId: newId, defaultAnimation: null };
-              if (newSheet?.frame?.width && newSheet?.frame?.height) {
-                patch.renderSize = { width: newSheet.frame.width, height: newSheet.frame.height };
-              }
-              onUpdateEntity(ent.id, patch);
-            }}>
-            <option value="">— none —</option>
-            {sprites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div className="al-section-title" style={{ marginBottom: 0 }}>ANIMATIONS</div>
+          <button
+            type="button"
+            className="small-btn"
+            onClick={() => {
+              const slot = { id: mkId(), name: 'new_anim', spriteSheetId: null, animName: null };
+              onUpdateEntity(ent.id, { animations: [...(ent.animations || []), slot] });
+            }}
+            style={{ fontSize: 9 }}
+          >+ Add</button>
         </div>
-        <div className="property-group">
-          <label>ANIMATION</label>
+        {ent.spriteSheetAssetId && !(ent.animations?.length) && (
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span>Legacy sprite set —</span>
+            <button
+              type="button"
+              className="small-btn"
+              style={{ fontSize: 9 }}
+              onClick={() => {
+                const legacySheet = sprites.find(s => s.id === ent.spriteSheetAssetId);
+                const slots = (legacySheet?.animations || []).map(a => ({ id: mkId(), name: a.name, spriteSheetId: ent.spriteSheetAssetId, animName: a.name }));
+                onUpdateEntity(ent.id, {
+                  animations: slots.length ? slots : [{ id: mkId(), name: 'idle', spriteSheetId: ent.spriteSheetAssetId, animName: null }],
+                  spriteSheetAssetId: null,
+                });
+              }}
+            >convert to slots</button>
+          </div>
+        )}
+        {!(ent.animations?.length) && !ent.spriteSheetAssetId && (
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', padding: '4px 0' }}>
+            No animations — click + Add to assign sprite animations to this entity.
+          </div>
+        )}
+        {/* Accordion: each slot collapses to a single header row; click to expand */}
+        {(ent.animations || []).map(slot => {
+          const slotSheet = sprites.find(s => s.id === slot.spriteSheetId) || null;
+          const slotAnims = slotSheet?.animations || [];
+          const nativeDir = slot.nativeDir || 'right';
+          const hasOverride = slot.renderH != null || slot.spriteOffsetY != null;
+          const isOpen = expandedSlots.has(slot.id);
+          const isDefault = ent.defaultAnimation === slot.name;
+          const toggleSlot = () => setExpandedSlots(prev => {
+            const next = new Set(prev);
+            if (next.has(slot.id)) next.delete(slot.id); else next.add(slot.id);
+            return next;
+          });
+          const updateSlot = (patch) => {
+            const updated = (ent.animations || []).map(a => a.id === slot.id ? { ...a, ...patch } : a);
+            onUpdateEntity(ent.id, { animations: updated });
+          };
+          const summary = slotSheet
+            ? `${slotSheet.name}${slot.animName ? ' · ' + slot.animName : ''}`
+            : 'no sheet';
+          return (
+            <div key={slot.id} style={{ marginBottom: 2, border: '1px solid var(--border)', background: isOpen ? 'rgba(0,0,0,0.25)' : 'transparent' }}>
+              {/* Header — click to toggle */}
+              <div
+                onClick={toggleSlot}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '4px 6px', cursor: 'pointer',
+                  userSelect: 'none',
+                }}
+              >
+                <span style={{ fontSize: 10, color: 'var(--text-dim)', flex: '0 0 auto' }}>{isOpen ? '▼' : '▶'}</span>
+                <span style={{ fontSize: 11, color: isDefault ? 'var(--accent)' : 'var(--text)', fontWeight: isDefault ? 'bold' : 'normal', flex: '0 0 auto', minWidth: 60 }}>
+                  {slot.name || '—'}
+                </span>
+                <span style={{ fontSize: 9, color: 'var(--text-dim)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {summary}
+                </span>
+                {isDefault && <span style={{ fontSize: 9, color: 'var(--accent)', flex: '0 0 auto' }} title="This is the default (idle) animation">★</span>}
+                {hasOverride && <span style={{ fontSize: 9, color: 'var(--accent)', flex: '0 0 auto' }} title="Has size overrides">⚙</span>}
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); onUpdateEntity(ent.id, { animations: (ent.animations || []).filter(a => a.id !== slot.id) }); }}
+                  style={{ background: 'transparent', border: 'none', color: '#ff5566', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1, flex: '0 0 auto' }}
+                  title="Remove animation slot"
+                >×</button>
+              </div>
+              {/* Expanded body */}
+              {isOpen && (
+                <div style={{ padding: '4px 8px 8px 8px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div className="property-group" style={{ margin: 0 }}>
+                    <label>NAME</label>
+                    <input
+                      type="text"
+                      value={slot.name || ''}
+                      placeholder="local name"
+                      onChange={e => updateSlot({ name: e.target.value })}
+                      style={{ fontSize: 10 }}
+                    />
+                  </div>
+                  <div className="property-group" style={{ margin: 0 }}>
+                    <label>SHEET</label>
+                    <select
+                      value={slot.spriteSheetId || ''}
+                      onChange={e => updateSlot({ spriteSheetId: e.target.value || null, animName: null })}
+                      style={{ fontSize: 10 }}
+                    >
+                      <option value="">— none —</option>
+                      {sprites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="property-group" style={{ margin: 0 }}>
+                    <label>ANIMATION</label>
+                    <select
+                      value={slot.animName || ''}
+                      disabled={!slotSheet}
+                      onChange={e => updateSlot({ animName: e.target.value || null })}
+                      style={{ fontSize: 10 }}
+                    >
+                      <option value="">— none —</option>
+                      {slotAnims.map(a => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="property-group" style={{ margin: 0 }}>
+                    <label title="Which direction the sprite faces in the source sheet">FACING IN SHEET</label>
+                    <button
+                      type="button"
+                      onClick={() => updateSlot({ nativeDir: nativeDir === 'right' ? 'left' : 'right' })}
+                      style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 2 }}
+                      title="Click to toggle native direction"
+                    >{nativeDir === 'right' ? '▶ right' : '◀ left'}</button>
+                  </div>
+                  <SlotOverlayPreview entity={ent} slot={slot} assets={assets} />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 2, paddingTop: 4, borderTop: '1px dashed rgba(255,255,255,0.08)' }}>
+                    <div className="property-group" style={{ margin: 0 }}>
+                      <label style={{ fontSize: 9 }} title="Override render height for this animation only. Empty = use entity RENDER H.">H OVERRIDE</label>
+                      <NullNumInput
+                        value={slot.renderH ?? null}
+                        placeholder={`${ent.renderSize?.height ?? 64}`}
+                        onCommit={n => updateSlot({ renderH: n })}
+                        style={{ fontSize: 10, padding: '1px 4px' }}
+                      />
+                    </div>
+                    <div className="property-group" style={{ margin: 0 }}>
+                      <label style={{ fontSize: 9 }} title="Override foot offset for this animation only. Empty = use entity FOOT OFFSET.">FOOT OFF</label>
+                      <NullNumInput
+                        value={slot.spriteOffsetY ?? null}
+                        placeholder={`${ent.spriteOffsetY ?? 0}`}
+                        onCommit={n => updateSlot({ spriteOffsetY: n })}
+                        style={{ fontSize: 10, padding: '1px 4px' }}
+                      />
+                    </div>
+                  </div>
+                  {hasOverride && (
+                    <button
+                      type="button"
+                      className="small-btn"
+                      onClick={() => updateSlot({ renderH: null, spriteOffsetY: null })}
+                      style={{ fontSize: 9, color: 'var(--text-dim)', alignSelf: 'flex-start' }}
+                    >clear overrides</button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div className="property-group" style={{ marginTop: 6 }}>
+          <label title="The animation played when the entity is at rest — no movement or attack input. If you have multiple idle variations, set the primary one here.">DEFAULT ANIM (idle)</label>
           <select value={ent.defaultAnimation || ''}
-            disabled={!sheet}
             onChange={e => onUpdateEntity(ent.id, { defaultAnimation: e.target.value || null })}>
             <option value="">— none —</option>
-            {animations.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
           </select>
         </div>
         <div className="property-group">
@@ -258,14 +784,14 @@ function Inspector({
         <div className="property-divider" />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="al-section-title" style={{ marginBottom: 0 }}>PLACEMENT</div>
-          {sheet?.frame?.width && sheet?.frame?.height && (
+          {defaultSheet?.frame?.width && defaultSheet?.frame?.height && (
             <button
               type="button"
               className="small-btn"
               onClick={() => onUpdateEntity(ent.id, {
-                renderSize: { width: sheet.frame.width, height: sheet.frame.height }
+                renderSize: { width: defaultSheet.frame.width, height: defaultSheet.frame.height }
               })}
-              title={`Reset render size to sprite frame (${sheet.frame.width}×${sheet.frame.height})`}
+              title={`Reset render size to sprite frame (${defaultSheet.frame.width}×${defaultSheet.frame.height})`}
               style={{ fontSize: 9 }}
             >↺ fit aspect</button>
           )}
@@ -273,18 +799,18 @@ function Inspector({
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
           <div className="property-group">
             <label>X (px)</label>
-            <input type="number" value={ent.position?.x ?? 0}
-              onChange={e => onUpdateEntity(ent.id, { position: { ...(ent.position || {}), x: parseInt(e.target.value, 10) || 0 } })} />
+            <NumericInput value={ent.position?.x ?? 0}
+              onCommit={n => onUpdateEntity(ent.id, { position: { ...(ent.position || {}), x: n } })} />
           </div>
           <div className="property-group">
             <label>Y (px)</label>
-            <input type="number" value={ent.position?.y ?? 0}
-              onChange={e => onUpdateEntity(ent.id, { position: { ...(ent.position || {}), y: parseInt(e.target.value, 10) || 0 } })} />
+            <NumericInput value={ent.position?.y ?? 0}
+              onCommit={n => onUpdateEntity(ent.id, { position: { ...(ent.position || {}), y: n } })} />
           </div>
         </div>
         {(() => {
-          const fw = sheet?.frame?.width;
-          const fh = sheet?.frame?.height;
+          const fw = defaultSheet?.frame?.width;
+          const fh = defaultSheet?.frame?.height;
           const canLock = !!(fw && fh);
           const aspect = canLock ? fw / fh : 1;
           const effectiveLock = aspectLocked && canLock;
@@ -305,8 +831,8 @@ function Inspector({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 28px 1fr', gap: 4, alignItems: 'end' }}>
               <div className="property-group">
                 <label>RENDER W (px)</label>
-                <input type="number" min="1" value={ent.renderSize?.width ?? 64}
-                  onChange={e => updateRenderW(parseInt(e.target.value, 10) || 1)} />
+                <NumericInput min={1} value={ent.renderSize?.width ?? 64}
+                  onCommit={updateRenderW} />
               </div>
               {/* Wrap the lock toggle in a property-group with an invisible
                   label so it occupies the same vertical structure as the
@@ -344,37 +870,219 @@ function Inspector({
               </div>
               <div className="property-group">
                 <label>RENDER H (px)</label>
-                <input type="number" min="1" value={ent.renderSize?.height ?? 64}
-                  onChange={e => updateRenderH(parseInt(e.target.value, 10) || 1)} />
+                <NumericInput min={1} value={ent.renderSize?.height ?? 64}
+                  onCommit={updateRenderH} />
               </div>
             </div>
           );
         })()}
+        <div className="property-group">
+          <label title="Pixels to shift the sprite UP relative to the hitbox bottom. Use when transparent space at the bottom of the frame makes the character appear to float.">FOOT OFFSET (px)</label>
+          <NumericInput value={ent.spriteOffsetY ?? 0}
+            onCommit={n => onUpdateEntity(ent.id, { spriteOffsetY: n })} />
+        </div>
 
         <div className="property-divider" />
         <div className="al-section-title">STATS</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
           <div className="property-group">
             <label>HP</label>
-            <input type="number" min="0" value={ent.stats?.hp ?? 100}
-              onChange={e => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), hp: parseInt(e.target.value, 10) || 0 } })} />
+            <NumericInput min={0} value={ent.stats?.hp ?? 100}
+              onCommit={n => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), hp: n } })} />
           </div>
           <div className="property-group">
             <label>SPEED</label>
-            <input type="number" min="0" value={ent.stats?.speed ?? 100}
-              onChange={e => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), speed: parseInt(e.target.value, 10) || 0 } })} />
+            <NumericInput min={0} value={ent.stats?.speed ?? 100}
+              onCommit={n => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), speed: n } })} />
+          </div>
+          <div className="property-group">
+            <label title="Speed when Shift is held (run). Defaults to 1.8× SPEED if not set.">RUN SPEED</label>
+            <NumericInput min={0} value={ent.stats?.runSpeed ?? Math.round((ent.stats?.speed ?? 100) * 1.8)}
+              onCommit={n => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), runSpeed: n } })} />
           </div>
           <div className="property-group">
             <label>DAMAGE</label>
-            <input type="number" min="0" value={ent.stats?.damage ?? 10}
-              onChange={e => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), damage: parseInt(e.target.value, 10) || 0 } })} />
+            <NumericInput min={0} value={ent.stats?.damage ?? 10}
+              onCommit={n => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), damage: n } })} />
+          </div>
+          <div className="property-group">
+            <label title="Jump height in tiles (platformer only)">JUMP (tiles)</label>
+            <NumericInput min={1} value={ent.stats?.jumpHeight ?? 3}
+              onCommit={n => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), jumpHeight: n } })} />
+          </div>
+          <div className="property-group">
+            <label title="Flat damage reduction applied to every hit this entity receives. High values make bosses/tanks absorb more damage.">DEFENSE</label>
+            <NumericInput min={0} value={ent.stats?.defense ?? 0}
+              onCommit={n => onUpdateEntity(ent.id, { stats: { ...(ent.stats || {}), defense: n } })} />
           </div>
         </div>
 
         <div className="property-divider" />
-        <div style={{ color: 'var(--text-dim)', fontSize: 10, lineHeight: 1.6 }}>
-          Persona, behavior scripts and physics arrive in later phases. For now this entity is a static animated placement preview.
+        <div className="al-section-title">BEHAVIOR</div>
+        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 6 }}>
+          Controls: ←→/WASD move · Space jump · Z attack · Shift run · E interact
         </div>
+        <div className="property-group">
+          <label title="Animation name to play while airborne (Space jump, platformer only). Leave blank to auto-detect (jump/leap/air/fall).">JUMP ANIM</label>
+          <select value={ent.behavior?.jumpAnim || ''}
+            onChange={e => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), jumpAnim: e.target.value || null } })}>
+            <option value="">— auto-detect —</option>
+            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+          </select>
+        </div>
+        <div className="property-group">
+          <label title="Animation name to play when Shift + move. Leave blank to auto-detect (run).">RUN ANIM</label>
+          <select value={ent.behavior?.runAnim || ''}
+            onChange={e => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), runAnim: e.target.value || null } })}>
+            <option value="">— auto-detect —</option>
+            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+          </select>
+        </div>
+
+        <div className="property-divider" style={{ margin: '8px 0 6px' }} />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <div className="al-section-title" style={{ marginBottom: 0 }}>ATTACKS</div>
+          <button
+            type="button" className="small-btn"
+            onClick={() => {
+              const atk = { id: mkId(), name: 'Attack', anim: null, damage: 25, duration: 400, comboNext: null, comboWindow: 500 };
+              onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), attacks: [...(ent.behavior?.attacks || []), atk] } });
+              setExpandedAttacks(prev => new Set([...prev, atk.id]));
+            }}
+            style={{ fontSize: 9 }}
+          >+ Add</button>
+        </div>
+        {!(ent.behavior?.attacks?.length) && (
+          <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 6 }}>
+            No attacks — Z uses auto-detect (attack/slash/punch/combo).
+          </div>
+        )}
+        {(ent.behavior?.attacks || []).map(atk => (
+          <AttackSlot
+            key={atk.id}
+            attack={atk}
+            allAttacks={ent.behavior?.attacks || []}
+            animSlots={ent.animations || []}
+            expanded={expandedAttacks.has(atk.id)}
+            onToggle={() => setExpandedAttacks(prev => { const n = new Set(prev); n.has(atk.id) ? n.delete(atk.id) : n.add(atk.id); return n; })}
+            onChange={patch => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), attacks: (ent.behavior?.attacks || []).map(a => a.id === atk.id ? { ...a, ...patch } : a) } })}
+            onRemove={() => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), attacks: (ent.behavior?.attacks || []).filter(a => a.id !== atk.id) } })}
+          />
+        ))}
+
+        <div className="property-divider" style={{ margin: '8px 0 6px' }} />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <div className="al-section-title" style={{ marginBottom: 0 }}>IDLES</div>
+          <button
+            type="button" className="small-btn"
+            onClick={() => {
+              const idle = { id: mkId(), name: 'Idle', anim: null, minTime: 2, maxTime: 6 };
+              onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), idles: [...(ent.behavior?.idles || []), idle] } });
+              setExpandedIdles(prev => new Set([...prev, idle.id]));
+            }}
+            style={{ fontSize: 9 }}
+          >+ Add</button>
+        </div>
+        {!(ent.behavior?.idles?.length) && (
+          <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 6 }}>
+            No idles — uses DEFAULT ANIM only.
+          </div>
+        )}
+        {(ent.behavior?.idles || []).map(idle => (
+          <IdleSlot
+            key={idle.id}
+            idle={idle}
+            animSlots={ent.animations || []}
+            expanded={expandedIdles.has(idle.id)}
+            onToggle={() => setExpandedIdles(prev => { const n = new Set(prev); n.has(idle.id) ? n.delete(idle.id) : n.add(idle.id); return n; })}
+            onChange={patch => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), idles: (ent.behavior?.idles || []).map(i => i.id === idle.id ? { ...i, ...patch } : i) } })}
+            onRemove={() => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), idles: (ent.behavior?.idles || []).filter(i => i.id !== idle.id) } })}
+          />
+        ))}
+
+        <div className="property-divider" style={{ margin: '8px 0 6px' }} />
+        <div className="al-section-title" style={{ marginBottom: 4 }}>HIT REACTIONS</div>
+        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 6 }}>
+          Animations played when this entity receives damage. Priority: heavy (≥ threshold) → normal.
+        </div>
+        <div className="property-group">
+          <label title="Played on any hit. Auto-detect: hurt / pain / flinch / damage.">HIT ANIM (normal)</label>
+          <select value={ent.behavior?.hitAnim || ''}
+            onChange={e => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), hitAnim: e.target.value || null } })}>
+            <option value="">— auto-detect —</option>
+            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+          </select>
+        </div>
+        <div className="property-group">
+          <label title="Played when damage ≥ HIT THRESHOLD. Auto-detect: heavy / stagger / knockback / ko.">HIT ANIM (heavy)</label>
+          <select value={ent.behavior?.heavyHitAnim || ''}
+            onChange={e => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), heavyHitAnim: e.target.value || null } })}>
+            <option value="">— none —</option>
+            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+          <div className="property-group" style={{ margin: 0 }}>
+            <label title="If the raw incoming hit power reaches this value, the heavy hit animation plays instead of the normal one. This controls ANIMATION only — actual damage reduction is set by DEFENSE in Stats.">ANIM THRESHOLD</label>
+            <NumericInput min={1} value={ent.behavior?.hitThreshold ?? 30}
+              onCommit={n => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), hitThreshold: n } })} />
+          </div>
+          <div className="property-group" style={{ margin: 0 }}>
+            <label title="How long the hit animation plays before returning to normal (milliseconds).">DURATION (ms)</label>
+            <NumericInput min={50} value={ent.behavior?.hitDuration ?? 500}
+              onCommit={n => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), hitDuration: n } })} />
+          </div>
+        </div>
+
+        <div className="property-divider" style={{ margin: '8px 0 6px' }} />
+        <div className="al-section-title" style={{ marginBottom: 4 }}>DEATH</div>
+        <div className="property-group">
+          <label title="Animation to play when HP reaches 0. Auto-detect: death / die / dead.">DEATH ANIM</label>
+          <select value={ent.behavior?.deathAnim || ''}
+            onChange={e => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), deathAnim: e.target.value || null } })}>
+            <option value="">— auto-detect —</option>
+            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+          </select>
+        </div>
+        <div className="property-group">
+          <label title="Milliseconds after the death animation starts before the entity is removed from the scene. Leave empty to keep the corpse visible indefinitely.">VANISH (ms)</label>
+          <NullNumInput
+            value={ent.behavior?.vanishDelay ?? null}
+            placeholder="never"
+            onCommit={n => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), vanishDelay: n } })}
+            style={{ fontFamily: 'monospace', fontSize: 10, width: '100%' }}
+          />
+        </div>
+
+        {ent.role === 'enemy' && (<>
+          <div className="property-divider" style={{ margin: '8px 0 6px' }} />
+          <div className="al-section-title" style={{ marginBottom: 4 }}>ENEMY AI</div>
+          <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 6 }}>
+            Patrol → Chase → Attack state machine. Ranges in tiles; attack range in pixels.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+            <div className="property-group" style={{ margin: 0 }}>
+              <label title="How far (in tiles) the enemy can see the player and start chasing.">DETECT (tiles)</label>
+              <NumericInput min={1} value={ent.behavior?.detectionRange ?? 8}
+                onCommit={n => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), detectionRange: n } })} />
+            </div>
+            <div className="property-group" style={{ margin: 0 }}>
+              <label title="Distance in pixels at which the enemy stops and attacks.">ATTACK (px)</label>
+              <NumericInput min={1} value={ent.behavior?.attackRange ?? 48}
+                onCommit={n => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), attackRange: n } })} />
+            </div>
+            <div className="property-group" style={{ margin: 0 }}>
+              <label title="How many tiles from spawn the enemy patrols before turning around.">PATROL (tiles)</label>
+              <NumericInput min={1} value={ent.behavior?.patrolRange ?? 3}
+                onCommit={n => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), patrolRange: n } })} />
+            </div>
+            <div className="property-group" style={{ margin: 0 }}>
+              <label title="Milliseconds between attacks (contact damage cooldown).">ATK CD (ms)</label>
+              <NumericInput min={100} value={ent.behavior?.attackCooldown ?? 1200}
+                onCommit={n => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), attackCooldown: n } })} />
+            </div>
+          </div>
+        </>)}
       </div>
     );
   }
@@ -385,6 +1093,29 @@ function Inspector({
     const lvl = selectedLevel;
     const tm = lvl.tileMap || {};
     const patchTileMap = (patch) => onUpdateLevel(lvl.id, { tileMap: { ...tm, ...patch } });
+
+    // Resize cols/rows while preserving painted content. Anchored at the
+    // bottom-left (data row 0 = floor) so growing adds empty rows on top
+    // and shrinking trims from the top — the user's existing world keeps
+    // its position. Data is a flat row-major array of length cols*rows.
+    const resizeTileMap = (newCols, newRows) => {
+      const oldCols = tm.cols || 0;
+      const oldRows = tm.rows || 0;
+      if (newCols === oldCols && newRows === oldRows) return;
+      const nextLayers = (tm.layers || []).map(layer => {
+        const oldData = layer.data || [];
+        const next = new Array(newCols * newRows).fill(0);
+        const copyRows = Math.min(oldRows, newRows);
+        const copyCols = Math.min(oldCols, newCols);
+        for (let r = 0; r < copyRows; r++) {
+          for (let c = 0; c < copyCols; c++) {
+            next[r * newCols + c] = oldData[r * oldCols + c] | 0;
+          }
+        }
+        return { ...layer, data: next };
+      });
+      onUpdateLevel(lvl.id, { tileMap: { ...tm, cols: newCols, rows: newRows, layers: nextLayers } });
+    };
     return (
       <div className="inspector">
         <h3>[INSPECTOR]</h3>
@@ -400,6 +1131,15 @@ function Inspector({
             onChange={e => onUpdateLevel(lvl.id, { name: e.target.value })} />
         </div>
         <div className="property-group">
+          <label>TYPE</label>
+          <select value={lvl.levelType || 'hud-only'}
+            onChange={e => onUpdateLevel(lvl.id, { levelType: e.target.value })}>
+            <option value="hud-only">HUD only (intro / menu / game over)</option>
+            <option value="game">Game only (no HUD overlay)</option>
+            <option value="game+hud">Game + HUD overlay</option>
+          </select>
+        </div>
+        <div className="property-group">
           <label>VIEWPORT</label>
           <select value={lvl.viewport || 'topdown'}
             onChange={e => onUpdateLevel(lvl.id, { viewport: e.target.value })}>
@@ -409,43 +1149,343 @@ function Inspector({
             <option value="board">Board</option>
           </select>
         </div>
+        {(() => {
+          const presets = {
+            platformer: { gravity: 800, label: 'Platformer', hint: 'gravity 800 · speed 180 · jump 3 tiles' },
+            topdown:    { gravity: 0,   label: 'Top-down',   hint: 'no gravity · speed 150 · 4-directional' },
+            isometric:  { gravity: 0,   label: 'Isometric',  hint: 'no gravity · speed 120 · 8-directional' },
+            board:      { gravity: 0,   label: 'Board',      hint: 'no gravity · speed 100 · grid movement' },
+          };
+          const speeds = { platformer: 180, topdown: 150, isometric: 120, board: 100 };
+          const vp = lvl.viewport || 'topdown';
+          const p = presets[vp];
+          if (!p) return null;
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+              <button
+                type="button"
+                className="small-btn"
+                style={{ fontSize: 9 }}
+                title={p.hint}
+                onClick={() => {
+                  onUpdateLevel(lvl.id, { gravity: p.gravity });
+                  // Also patch all playerMain entities with recommended speed
+                  // We don't have direct access here — leave a hint instead.
+                }}
+              >↺ apply {p.label} defaults</button>
+              <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{p.hint}</span>
+            </div>
+          );
+        })()}
         <div className="property-group">
           <label>GRAVITY</label>
-          <input type="number" step="10" value={lvl.gravity ?? 0}
-            onChange={e => onUpdateLevel(lvl.id, { gravity: parseFloat(e.target.value) || 0 })} />
+          <NumericInput value={lvl.gravity ?? 0}
+            onCommit={n => onUpdateLevel(lvl.id, { gravity: n })} />
         </div>
+
+        <div className="property-divider" />
+        <div className="al-section-title">CAMERA / VIEWPORT</div>
+        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 4 }}>
+          Tiles visible at once. Smaller than the level → camera follows player.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+          <div className="property-group">
+            <label>VIEWPORT W (tiles)</label>
+            <NumericInput min={4} value={lvl.viewportCols ?? 20}
+              onCommit={n => onUpdateLevel(lvl.id, { viewportCols: n })} />
+          </div>
+          <div className="property-group">
+            <label>VIEWPORT H (tiles)</label>
+            <NumericInput min={4} value={lvl.viewportRows ?? 14}
+              onCommit={n => onUpdateLevel(lvl.id, { viewportRows: n })} />
+          </div>
+        </div>
+
+        <div className="property-divider" />
+        <div className="al-section-title">BACKGROUNDS</div>
+        {(() => {
+          const bgs = lvl.backgrounds || [];
+          const available = assets?.backgrounds || [];
+          return (
+            <>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <select
+                  value=""
+                  onChange={e => { if (e.target.value) onAddBackgroundLayer(e.target.value); }}
+                  style={{ flex: 1 }}
+                  disabled={available.length === 0}
+                >
+                  <option value="">{available.length ? '+ Add background layer…' : 'No backgrounds (import in Sprites→Backgrounds)'}</option>
+                  {available.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+              {bgs.length === 0 && (
+                <div style={{ fontSize: 10, color: 'var(--text-dim)', padding: 8 }}>
+                  Layers render bottom-to-top — the first one is the farthest back.
+                </div>
+              )}
+              {bgs.map((layer, i) => {
+                const asset = available.find(a => a.id === layer.assetId);
+                return (
+                  <div key={layer.id} style={{ padding: 6, marginTop: 6, border: '1px solid var(--border)', minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                      {asset?.src && <img src={asset.src} alt="" style={{ width: 40, height: 28, objectFit: 'cover', background: 'rgba(0,0,0,0.4)', imageRendering: 'pixelated', flex: '0 0 40px' }} />}
+                      <span
+                        title={asset?.name || ''}
+                        style={{ flex: '1 1 0', minWidth: 0, fontSize: 11, color: 'var(--accent)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                      >{asset?.name || '(missing asset)'}</span>
+                      <button className="small-btn" onClick={() => onMoveBackgroundLayer(layer.id, 'up')}   disabled={i === 0} style={{ minWidth: 22, padding: '0 4px', flex: '0 0 auto' }} title="Move farther back">↑</button>
+                      <button className="small-btn" onClick={() => onMoveBackgroundLayer(layer.id, 'down')} disabled={i === bgs.length - 1} style={{ minWidth: 22, padding: '0 4px', flex: '0 0 auto' }} title="Move closer">↓</button>
+                      <button className="small-btn" onClick={() => onRemoveBackgroundLayer(layer.id)} style={{ color: '#ff5566', borderColor: '#ff5566', padding: '0 6px', flex: '0 0 auto' }}>×</button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 4 }}>
+                      <div className="property-group">
+                        <label>PARALLAX X</label>
+                        <NumericInput value={Math.round((layer.parallax?.x ?? 0.5) * 100)}
+                          onCommit={n => onUpdateBackgroundLayer(layer.id, { parallax: { ...(layer.parallax || {}), x: n / 100 } })} />
+                      </div>
+                      <div className="property-group">
+                        <label>PARALLAX Y</label>
+                        <NumericInput value={Math.round((layer.parallax?.y ?? 0.5) * 100)}
+                          onCommit={n => onUpdateBackgroundLayer(layer.id, { parallax: { ...(layer.parallax || {}), y: n / 100 } })} />
+                      </div>
+                      <div className="property-group">
+                        <label>OFFSET X</label>
+                        <NumericInput value={layer.offset?.x ?? 0}
+                          onCommit={n => onUpdateBackgroundLayer(layer.id, { offset: { ...(layer.offset || {}), x: n } })} />
+                      </div>
+                      <div className="property-group">
+                        <label>OFFSET Y</label>
+                        <NumericInput value={layer.offset?.y ?? 0}
+                          onCommit={n => onUpdateBackgroundLayer(layer.id, { offset: { ...(layer.offset || {}), y: n } })} />
+                      </div>
+                      <div className="property-group">
+                        <label title="Auto-scroll speed in play mode only — not visible in editor">SCROLL X (px/s) ▶</label>
+                        <NumericInput value={layer.scroll?.x ?? 0}
+                          onCommit={n => onUpdateBackgroundLayer(layer.id, { scroll: { ...(layer.scroll || {}), x: n } })} />
+                      </div>
+                      <div className="property-group">
+                        <label title="Auto-scroll speed in play mode only — not visible in editor">SCROLL Y (px/s) ▶</label>
+                        <NumericInput value={layer.scroll?.y ?? 0}
+                          onCommit={n => onUpdateBackgroundLayer(layer.id, { scroll: { ...(layer.scroll || {}), y: n } })} />
+                      </div>
+                      <div className="property-group">
+                        <label>OPACITY %</label>
+                        <NumericInput min={0} max={100} value={Math.round((layer.opacity ?? 1) * 100)}
+                          onCommit={n => onUpdateBackgroundLayer(layer.id, { opacity: n / 100 })} />
+                      </div>
+                      <div className="property-group">
+                        <label>SCALE %</label>
+                        <NumericInput min={1} value={Math.round((layer.scale ?? 1) * 100)}
+                          onCommit={n => onUpdateBackgroundLayer(layer.id, { scale: n / 100 })} />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 10, color: 'var(--text-dim)' }}>
+                      <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input type="checkbox" checked={layer.repeat?.x !== false} onChange={e => onUpdateBackgroundLayer(layer.id, { repeat: { ...(layer.repeat || {}), x: e.target.checked } })} /> repeat X
+                      </label>
+                      <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input type="checkbox" checked={layer.repeat?.y === true} onChange={e => onUpdateBackgroundLayer(layer.id, { repeat: { ...(layer.repeat || {}), y: e.target.checked } })} /> repeat Y
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+              {bgs.length > 0 && (
+                <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>
+                  PARALLAX = % of camera movement (0 = static, 100 = tracks 1:1). Auto-scroll px/s and parallax animate at runtime.
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         <div className="property-divider" />
         <div className="al-section-title">TILEMAP</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
           <div className="property-group">
             <label>TILE W (px)</label>
-            <input type="number" min="1" value={tm.tileWidth || 32}
-              onChange={e => patchTileMap({ tileWidth: parseInt(e.target.value, 10) || 32 })} />
+            <NumericInput min={1} value={tm.tileWidth || 32}
+              onCommit={n => patchTileMap({ tileWidth: n })} />
           </div>
           <div className="property-group">
             <label>TILE H (px)</label>
-            <input type="number" min="1" value={tm.tileHeight || 32}
-              onChange={e => patchTileMap({ tileHeight: parseInt(e.target.value, 10) || 32 })} />
+            <NumericInput min={1} value={tm.tileHeight || 32}
+              onCommit={n => patchTileMap({ tileHeight: n })} />
           </div>
           <div className="property-group">
             <label>COLS</label>
-            <input type="number" min="1" value={tm.cols || 30}
-              onChange={e => patchTileMap({ cols: parseInt(e.target.value, 10) || 30 })} />
+            <NumericInput min={1} value={tm.cols || 22}
+              onCommit={n => resizeTileMap(n, tm.rows || 22)} />
           </div>
           <div className="property-group">
             <label>ROWS</label>
-            <input type="number" min="1" value={tm.rows || 17}
-              onChange={e => patchTileMap({ rows: parseInt(e.target.value, 10) || 17 })} />
+            <NumericInput min={1} value={tm.rows || 22}
+              onCommit={n => resizeTileMap(tm.cols || 22, n)} />
           </div>
         </div>
 
-        <div className="property-divider" />
-        <div style={{ color: 'var(--text-dim)', fontSize: 10, lineHeight: 1.7 }}>
-          <b style={{ color: 'var(--accent)' }}>NOTES</b><br />
-          Tileset asset, spawn point and music will be wired in Phase 2.<br />
-          Tile painting on canvas arrives in Phase 3.
+        <div className="property-group">
+          <label>TILESET</label>
+          <select
+            value={tm.tilesetAssetId || ''}
+            onChange={e => patchTileMap({ tilesetAssetId: e.target.value || null })}
+          >
+            <option value="">— none —</option>
+            {(() => {
+              const sources = listTileSources(assets);
+              const tilesets = sources.filter(s => s.kind === 'tileset');
+              const sprites  = sources.filter(s => s.kind === 'spriteSheet');
+              return (
+                <>
+                  {tilesets.length > 0 && (
+                    <optgroup label="Tilesets">
+                      {tilesets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </optgroup>
+                  )}
+                  {sprites.length > 0 && (
+                    <optgroup label="Sprite sheets (as tilesets)">
+                      {sprites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </optgroup>
+                  )}
+                </>
+              );
+            })()}
+          </select>
         </div>
+
+        {(() => {
+          const tileset = resolveTilesetView(assets, tm.tilesetAssetId);
+          const layerId = (tm.layers || [])[0]?.id || null;
+          if (!tileset) {
+            if (!layerId) {
+              return (
+                <div style={{ fontSize: 10, color: 'var(--text-dim)', padding: 8, border: '1px dashed var(--border)', marginTop: 4 }}>
+                  Pick a tileset above. Anything with a grid works — including sprite sheets imported in the Sprites tab.
+                </div>
+              );
+            }
+            // No tileset but a layer exists — show collision painter with TILE / LINE mode selector.
+            const isLineBrush = paintBrush?.mode === 'line';
+            const isMaskBrush = paintBrush?.mode === 'mask';
+            const isTileBrush = !isLineBrush && !isMaskBrush;
+            const solidArmed  = isTileBrush && paintBrush?.layerId === layerId && paintBrush?.tileValue === 1;
+            const eraseArmed  = isTileBrush && paintBrush?.layerId === layerId && paintBrush?.tileValue === 0;
+            const shapes         = selectedLevel?.colliderShapes  || [];
+            const occlusionShapes = selectedLevel?.occlusionShapes || [];
+            const btnBase = { fontFamily: 'monospace', fontSize: 10, padding: '2px 6px', cursor: 'pointer', border: '1px solid var(--border)' };
+            return (
+              <>
+                <div className="al-section-title" style={{ marginTop: 8 }}>COLLISION PAINTER</div>
+                {/* Mode selector: Tile / Line / Mask */}
+                <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>
+                  {[
+                    ['■ Tile', 'tile',  null],
+                    ['/ Line', 'line', { mode: 'line' }],
+                    ['◈ Mask', 'mask', { mode: 'mask' }],
+                  ].map(([label, id, brush]) => {
+                    const active = id === 'tile' ? isTileBrush && !solidArmed && !eraseArmed
+                                 : id === 'line' ? isLineBrush : isMaskBrush;
+                    return (
+                      <button key={id} className="retro-button" style={{ flex: 1,
+                        background: active ? 'var(--accent)' : undefined,
+                        color:      active ? 'var(--bg)'     : undefined,
+                      }} onClick={() => onSetPaintBrush(active ? null : brush)}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* TILE mode */}
+                {isTileBrush && (
+                  <>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                      <button className="retro-button"
+                        style={{ flex: 1, background: solidArmed ? 'var(--accent)' : undefined, color: solidArmed ? 'var(--bg)' : undefined }}
+                        onClick={() => onSetPaintBrush(solidArmed ? null : { layerId, tileValue: 1 })}
+                        title="Paint solid collision blocks">■ Solid</button>
+                      <button className="retro-button"
+                        style={{ flex: 1, background: eraseArmed ? 'var(--accent)' : undefined, color: eraseArmed ? 'var(--bg)' : undefined }}
+                        onClick={() => onSetPaintBrush(eraseArmed ? null : { layerId, tileValue: 0 })}
+                        title="Erase collision blocks">□ Erase</button>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 6 }}>
+                      {(solidArmed || eraseArmed) ? 'Click/drag on the canvas · click again to disarm' : 'Arm a brush then paint collision cells on the background.'}
+                    </div>
+                  </>
+                )}
+
+                {/* LINE mode */}
+                {isLineBrush && (
+                  <>
+                    <div style={{ fontSize: 10, color: 'rgba(0,220,255,0.85)', marginTop: 6, lineHeight: 1.5 }}>
+                      Click to place points · dbl-click or Esc to finish.<br/>Backspace undoes last point.
+                    </div>
+                    {shapes.length > 0 ? (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: 1 }}>COLLISION LINES</div>
+                        {shapes.map((shape, si) => (
+                          <div key={shape.id || si} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,165,0,0.9)' }}>Line {si + 1} · {shape.points?.length || 0} pts</span>
+                            <button style={{ ...btnBase, background: 'transparent', color: '#ff6666', borderColor: '#ff6666' }}
+                              onClick={() => onUpdateLevel(lvl.id, { colliderShapes: shapes.filter(s => s.id !== shape.id) })}
+                              title="Delete">×</button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>No lines yet.</div>}
+                  </>
+                )}
+
+                {/* MASK mode */}
+                {isMaskBrush && (
+                  <>
+                    <div style={{ fontSize: 10, color: 'rgba(180,0,255,0.85)', marginTop: 6, lineHeight: 1.5 }}>
+                      Dibuja un polígono sobre el objeto.<br/>El personaje quedará detrás de esa región.
+                    </div>
+                    {occlusionShapes.length > 0 ? (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: 1 }}>MASKS</div>
+                        {occlusionShapes.map((shape, si) => (
+                          <div key={shape.id || si} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(180,0,255,0.9)' }}>Mask {si + 1} · {shape.points?.length || 0} pts</span>
+                            <button style={{ ...btnBase, background: 'transparent', color: '#ff6666', borderColor: '#ff6666' }}
+                              onClick={() => onUpdateLevel(lvl.id, { occlusionShapes: occlusionShapes.filter(s => s.id !== shape.id) })}
+                              title="Delete">×</button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>No masks yet.</div>}
+                  </>
+                )}
+              </>
+            );
+          }
+          if (!layerId) {
+            return (
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', padding: 8 }}>
+                This level has no tilemap layers.
+              </div>
+            );
+          }
+          return (
+            <>
+              <div className="al-section-title" style={{ marginTop: 8 }}>PALETTE</div>
+              <TilePalette
+                tileset={tileset}
+                brush={paintBrush}
+                layerId={layerId}
+                onSetBrush={onSetPaintBrush}
+              />
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 6 }}>
+                {paintBrush
+                  ? 'Click on the canvas to paint · drag to paint a stroke · click brush again to disarm'
+                  : 'Click a tile to arm the brush.'}
+              </div>
+            </>
+          );
+        })()}
       </div>
     );
   }
@@ -795,7 +1835,53 @@ function Inspector({
         {renderColor('TEXT COLOR','textColor','#00ff00')}
         {renderColor('BACKGROUND','bgColor','#000000', true)}
         {renderColor('BORDER COLOR','borderColor','#00ff00')}
-        
+
+        <div className="property-divider" />
+        <div className="al-section-title">BACKGROUND IMAGE</div>
+        <div className="property-group">
+          <label>SOURCE</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <input
+              type="text"
+              value={localProps.bgImage || ''}
+              onChange={e => updateAndCommit('bgImage', e.target.value)}
+              placeholder="https://… or paste data URL"
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <label style={{ margin: 0, fontSize: 9, cursor: 'pointer', border: '1px solid var(--border)', padding: '2px 6px', background: 'rgba(255,255,255,0.05)' }}>
+                Upload File
+                <input
+                  type="file"
+                  style={{ display: 'none' }}
+                  accept="image/*"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => updateAndCommit('bgImage', ev.target.result);
+                    reader.readAsDataURL(file);
+                  }}
+                />
+              </label>
+              {localProps.bgImage && (
+                <button className="small-btn" onClick={() => updateAndCommit('bgImage', '')} style={{ color: '#ff5566', borderColor: '#ff5566' }}>clear</button>
+              )}
+              {localProps.bgImage?.startsWith('data:') && <span style={{ fontSize: 8, color: 'var(--accent)' }}>Base64 Loaded</span>}
+            </div>
+          </div>
+        </div>
+        {localProps.bgImage && (
+          <div className="property-group">
+            <label>FIT</label>
+            <select value={localProps.bgImageFit || 'cover'} onChange={e => updateAndCommit('bgImageFit', e.target.value)}>
+              <option value="cover">Cover (crop to fill)</option>
+              <option value="contain">Contain (fit inside)</option>
+              <option value="fill">Fill (stretch to size)</option>
+              <option value="tile">Tile (repeat)</option>
+            </select>
+          </div>
+        )}
+
         <div className="property-divider" />
         <div className="property-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <label style={{ margin: 0 }}>SHOW CLOSE [X]</label>
@@ -846,6 +1932,7 @@ function Inspector({
           <select value={localProps.action||'none'} onChange={e => updateAndCommit('action', e.target.value)}>
             <option value="none">None</option>
             <option value="screen">Navigate to Screen</option>
+            {activeScreen?.kind === 'world' && <option value="level">Go to Level</option>}
             <option value="overlay">Open Overlay</option>
             <option value="external">Open External Link</option>
             <option value="email">Send Email</option>
@@ -864,6 +1951,16 @@ function Inspector({
             <input type="checkbox" checked={localProps.staggered||false} onChange={e => updateAndCommit('staggered', e.target.checked)} />
           </div>
         </>)}
+        {localProps.action === 'level' && (
+          <div className="property-group"><label>TARGET LEVEL</label>
+            <select value={localProps.targetLevelId||''} onChange={e => updateAndCommit('targetLevelId', e.target.value)}>
+              <option value="">-- Select Level --</option>
+              {(screens||[]).filter(s => s.kind === 'world').flatMap(s =>
+                (s.levels||[]).map(l => <option key={l.id} value={l.id}>{s.name} · {l.name}</option>)
+              )}
+            </select>
+          </div>
+        )}
         {localProps.action === 'overlay' && (
           <div className="property-group"><label>TARGET OVERLAY</label>
             <select value={localProps.targetOverlayId||''} onChange={e => updateAndCommit('targetOverlayId', e.target.value)}>
@@ -992,6 +2089,7 @@ function Inspector({
               <option value="overlay">Open Overlay</option>
               <option value="external">Open External Link</option>
               <option value="email">Send Email</option>
+              {activeScreen?.kind === 'world' && <option value="level">Go to Level</option>}
             </select>
           </div>
           {localProps.action === 'screen' && (<>
@@ -1019,6 +2117,16 @@ function Inspector({
           )}
           {localProps.action === 'email' && (
             <div className="property-group"><label>EMAIL</label><input type="text" value={localProps.mailto||''} onChange={e => updateAndCommit('mailto', e.target.value)} placeholder="user@example.com" /></div>
+          )}
+          {localProps.action === 'level' && (
+            <div className="property-group"><label>TARGET LEVEL</label>
+              <select value={localProps.targetLevelId||''} onChange={e => updateAndCommit('targetLevelId', e.target.value)}>
+                <option value="">-- Select Level --</option>
+                {(screens||[]).filter(s => s.kind === 'world').flatMap(s =>
+                  (s.levels||[]).map(l => <option key={l.id} value={l.id}>{s.name} · {l.name}</option>)
+                )}
+              </select>
+            </div>
           )}
         </>);
       }
@@ -1109,9 +2217,13 @@ function Inspector({
                         updateAndCommit('src', res);
                         const img = new window.Image();
                         img.onload = () => {
-                          updateAndCommit('aspectRatio', img.width / img.height);
-                          updateAndCommit('width', img.width);
-                          updateAndCommit('height', img.height);
+                          // SVGs often report 1×1 or 0×0 intrinsic px size (viewBox-only).
+                          // Only apply dimensions when they look like real pixel art/photos.
+                          if (img.width > 4 && img.height > 4) {
+                            updateAndCommit('aspectRatio', img.width / img.height);
+                            updateAndCommit('width', img.width);
+                            updateAndCommit('height', img.height);
+                          }
                         };
                         img.src = res;
                       };
@@ -1509,7 +2621,7 @@ function Inspector({
 
   return (
     <div className="inspector">
-      <h3>[{component.type.toUpperCase()}]</h3>
+      <h3>[{(component.type || 'COMPONENT').toUpperCase()}]</h3>
       <div className="property-group">
         <label>ID</label>
         <div style={{ fontSize: 9, color: 'var(--text-dim)', wordBreak: 'break-all' }}>{component.id}</div>

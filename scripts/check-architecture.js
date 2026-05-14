@@ -12,15 +12,16 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
 
-// The 23 components that existed before the Game Builder work began.
-// Until Phase 5 explicitly opens them, these files must remain untouched
-// vs the integration branch (default: main).
+// The components that existed before the Game Builder work began. Until
+// Phase 5 explicitly opens them, frozen files must remain untouched vs
+// main. EXCEPTION: Window.jsx was unfrozen in Phase 3b after explicit user
+// approval to add background-image props for game-style HUDs/menus.
 const FROZEN_COMPONENTS = [
   'Button.jsx', 'CheckBox.jsx', 'ComboBox.jsx', 'Data.jsx', 'DataRepeater.jsx',
   'Form.jsx', 'Frame.jsx', 'Image.jsx', 'Line.jsx', 'ListBox.jsx',
   'Loader.jsx', 'Overlay.jsx', 'PictureBox.jsx', 'RadioButton.jsx', 'Row.jsx',
   'ScrollBar.jsx', 'Shape.jsx', 'Table.jsx', 'Tabs.jsx', 'Text.jsx',
-  'TextBox.jsx', 'Timer.jsx', 'Window.jsx',
+  'TextBox.jsx', 'Timer.jsx',
 ];
 
 const BASE_REF = process.env.ARCH_BASE_REF || 'main';
@@ -58,8 +59,13 @@ function checkLevelCanvasIsolation() {
   const path = join(repoRoot, 'src/components/LevelCanvas.jsx');
   if (!existsSync(path)) return; // not yet created — Phase 3
   const src = readFileSync(path, 'utf-8');
-  if (/import\s+[^;]*LayoutRow/.test(src) || /from\s+['"][^'"]*Canvas['"]/.test(src)) {
-    violations.push(`${rel(path)} must not import LayoutRow or Canvas — coordinate systems must stay isolated`);
+  if (/import\s+[^;]*LayoutRow/.test(src)) {
+    violations.push(`${rel(path)} must not import LayoutRow — coordinate systems must stay isolated`);
+  }
+  // Match an import path that ends in /Canvas (the flexbox-based root canvas)
+  // but allow sibling files like ./LevelCanvas, ./TileMapCanvas.
+  if (/from\s+['"][^'"]*\/Canvas['"]/.test(src)) {
+    violations.push(`${rel(path)} must not import the root Canvas — coordinate systems must stay isolated`);
   }
 }
 
