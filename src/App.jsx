@@ -19,7 +19,9 @@ import Inspector from './components/Inspector';
 import DatabasePanel from './components/DatabasePanel';
 import LevelTabs from './components/LevelTabs';
 import LevelCanvas from './components/LevelCanvas';
+import RuntimeView from './components/RuntimeView';
 import SpriteSheetManager from './components/SpriteSheetManager';
+import { apiFetch, getToken, setToken, clearToken } from './lib/apiFetch';
 import './App.css';
 import appCss from './App.css?raw';
 
@@ -78,16 +80,77 @@ function App() {
   // 'game' = entities + tilemap (absolute positioning, LevelCanvas).
   // 'hud'  = level.rows (flexbox layout, the existing Canvas).
   const [levelLayer, setLevelLayer] = useState('game');
+  // Active tile brush. When set, clicks on LevelCanvas paint instead of
+  // deselecting. tileValue 0 = eraser; 1+ = tileset cell index + 1.
+  const [paintBrush, setPaintBrush] = useState(null);
+  // True while the runtime is mounted on the level canvas. Toggled by
+  // the Play / Stop button on LevelTabs.
+  const [isPlaying, setIsPlaying] = useState(false);
   // Assets live in a sidecar file (projects/<id>.assets.json) so the main
   // project JSON stays small and the editor can save schema changes without
   // re-uploading megabytes of base64 sprite data.
-  const [assets, setAssetsState] = useState({ sprites: [], tilesets: [], sounds: [] });
+  const [assets, setAssetsState] = useState({ sprites: [], tilesets: [], sounds: [], backgrounds: [] });
   const [showSpriteSheetManager, setShowSpriteSheetManager] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
 
   const isInitialLoading = useRef(true);
   const saveTimer = useRef(null);
   const assetsDirty = useRef(false);
   const assetsSaveTimer = useRef(null);
+  const canvasContainerRef = useRef(null);
+
+  // Auth: verify token on mount, show login if absent/invalid
+  useEffect(() => {
+    const token = getToken();
+    if (!token) { setShowLogin(true); return; }
+    fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(user => {
+        if (user) setCurrentUser(user);
+        else { clearToken(); setShowLogin(true); }
+      })
+      .catch(() => { clearToken(); setShowLogin(true); });
+  }, []);
+
+  // Show login modal whenever any apiFetch gets a 401
+  useEffect(() => {
+    const handler = () => setShowLogin(true);
+    window.addEventListener('tuify:auth-required', handler);
+    return () => window.removeEventListener('tuify:auth-required', handler);
+  }, []);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setLoginError(data.error || 'Login failed'); return; }
+      setToken(data.token);
+      setCurrentUser(data);
+      setShowLogin(false);
+      setLoginPassword('');
+    } catch {
+      setLoginError('Connection error — is the server running?');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    clearToken();
+    setCurrentUser(null);
+    setShowLogin(true);
+  };
 
   // Wrap setAssets so every mutation flips the dirty flag and schedules a
   // sidecar save. Components should always go through this setter.
@@ -98,7 +161,7 @@ function App() {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects');
+      const res = await apiFetch('/api/projects');
       const data = await res.json();
       setProjectList(data);
     } catch (err) {
@@ -122,7 +185,7 @@ function App() {
     if (!currentProject?.id || currentProject.id === 'default') return;
     if (assetsSaveTimer.current) clearTimeout(assetsSaveTimer.current);
     assetsSaveTimer.current = setTimeout(() => {
-      fetch(`/api/projects/${currentProject.id}/assets`, {
+      apiFetch(`/api/projects/${currentProject.id}/assets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(assets),
@@ -155,7 +218,7 @@ function App() {
         lastSaved: new Date().toISOString()
       };
 
-      fetch('/api/projects', {
+      apiFetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(projectData)
@@ -188,6 +251,13 @@ function App() {
     ? (activeScreen.levels || []).find(l => l.id === activeScreen.currentLevelId) || null
     : null;
   const rows = activeLevel ? (activeLevel.rows || []) : (activeScreen?.rows || []);
+
+  // Sync the layer toggle whenever the active level changes so each level
+  // independently remembers its last-viewed layer (game vs hud).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (activeLevel) setLevelLayer(activeLevel.editorLayer || 'game');
+  }, [activeLevel?.id]);
 
   // When toggling modes, keep currentScreenId pointing at something visible.
   useEffect(() => {
@@ -385,9 +455,33 @@ function App() {
     }));
   }, [updateScreens]);
 
+  // Measure the visible LevelCanvas area, then pick a tile size that lets
+  // the world fit the viewport with exactly 22 columns of tiles. Rows are
+  // computed from the same tile size against the available height so the
+  // grid stays square-ish. Declared above addLevel (its dependency).
+  const measureLevelCanvasGrid = useCallback(() => {
+    const TARGET_COLS = 22;
+    const c = canvasContainerRef.current;
+    if (!c || !c.clientWidth || !c.clientHeight) {
+      return { cols: TARGET_COLS, rows: TARGET_COLS, tileSize: 32 };
+    }
+    const tabsHeight = 36; // LevelTabs strip
+    const w = c.clientWidth;
+    const h = Math.max(0, c.clientHeight - tabsHeight);
+    // Pick the largest tile size that fits TARGET_COLS columns, but never
+    // exceed the height. Floor to a power-of-2 friendly value for crispness.
+    const rawTile = Math.floor(w / TARGET_COLS);
+    const tileSize = Math.max(8, rawTile);
+    const rows = Math.max(4, Math.floor(h / tileSize));
+    return { cols: TARGET_COLS, rows, tileSize };
+  }, []);
+
   // ── Levels (only meaningful for screens with kind === 'world') ──────────
-  const makeDefaultLevel = useCallback((world, index) => {
+  const makeDefaultLevel = useCallback((world, index, opts = {}) => {
     const ws = world?.worldSettings || {};
+    const tileSize = opts.tileSize || 32;
+    const cols = opts.cols ?? 22;
+    const rows = opts.rows ?? 22;
     return {
       id: mkId(),
       name: `Level ${index + 1}`,
@@ -395,26 +489,29 @@ function App() {
       gravity: ws.defaultGravity ?? 0,
       backgroundMusicAssetId: null,
       spawnPointId: null,
-      // Each level has its own UI rows — same shape as Screen.rows. Mutations
-      // route here when the level is the active canvas surface.
       rows: [],
       tileMap: {
-        tileWidth: 32, tileHeight: 32, cols: 30, rows: 17,
+        tileWidth: tileSize, tileHeight: tileSize, cols, rows,
         tilesetAssetId: null,
         layers: [{ id: mkId(), name: 'Background', kind: 'tiles', data: [] }],
       },
       entities: [],
+      levelType: 'hud-only',
     };
   }, []);
 
   const addLevel = useCallback((worldId) => {
+    // Auto-fit the new level's tilemap to whatever the canvas area
+    // measures right now so the world fills the viewport instead of
+    // landing on a one-size-fits-all default that leaves empty space.
+    const grid = measureLevelCanvasGrid();
     updateScreens(prev => prev.map(s => {
       if (s.id !== worldId || s.kind !== 'world') return s;
       const levels = s.levels || [];
-      const next = makeDefaultLevel(s, levels.length);
+      const next = makeDefaultLevel(s, levels.length, grid);
       return { ...s, levels: [...levels, next], currentLevelId: next.id };
     }));
-  }, [updateScreens, makeDefaultLevel]);
+  }, [updateScreens, makeDefaultLevel, measureLevelCanvasGrid]);
 
   const moveLevel = useCallback((worldId, dragIndex, hoverIndex) => {
     updateScreens(prev => prev.map(s => {
@@ -493,6 +590,7 @@ function App() {
     setSelectedIds([]);
   }, [updateScreens]);
 
+
   // ── Entities (live inside a level, absolute positioning) ────────────────
   const makeDefaultEntity = useCallback((type, position = { x: 0, y: 0 }) => ({
     id: mkId(),
@@ -501,10 +599,22 @@ function App() {
     role: 'prop',
     position,
     renderSize: { width: 64, height: 64 },
-    spriteSheetAssetId: null,
+    animations: [],           // per-animation sprite sheet mappings
+    spriteSheetAssetId: null, // legacy fallback — kept for backward compat
     defaultAnimation: null,
     facing: 'right',
-    stats: { hp: 100, speed: 100, damage: 10 },
+    stats: { hp: 100, speed: 100, runSpeed: 180, damage: 10, jumpHeight: 3, defense: 0 },
+    spriteOffsetY: 0,
+    behavior: {
+      // Multi-attack / combo list (replaces single attackAnim for new entities)
+      attacks: [], idles: [],
+      // Single-anim shortcuts (still used as fallback when attacks[] is empty)
+      attackAnim: null, runAnim: null, jumpAnim: null,
+      hitAnim: null, heavyHitAnim: null,
+      hitThreshold: 30, hitDuration: 500,
+      // Enemy AI defaults
+      detectionRange: 8, attackRange: 48, patrolRange: 3, attackCooldown: 1200,
+    },
     persona: {},
   }), []);
 
@@ -537,6 +647,82 @@ function App() {
               e.id === entityId ? { ...e, ...patch } : e
             ),
           };
+        }),
+      };
+    }));
+  }, [updateScreens]);
+
+  // ── Background layers (per-level, render below the tilemap) ─────────────
+  const addBackgroundLayer = useCallback((worldId, levelId, assetId) => {
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      return {
+        ...s,
+        levels: (s.levels || []).map(l => {
+          if (l.id !== levelId) return l;
+          const layers = l.backgrounds || [];
+          const next = {
+            id: mkId(),
+            assetId,
+            // 0 = static, 0.5 = half-camera-speed (distant), 1 = tracks 1:1.
+            parallax: { x: 0.5, y: 0.5 },
+            // Continuous auto-scroll in px/sec (clouds, water, etc.). Applied
+            // by the runtime; static in the editor preview.
+            scroll: { x: 0, y: 0 },
+            offset: { x: 0, y: 0 },
+            repeat: { x: true, y: false },
+            opacity: 1,
+            scale: 1,
+          };
+          return { ...l, backgrounds: [...layers, next] };
+        }),
+      };
+    }));
+  }, [updateScreens]);
+
+  const updateBackgroundLayer = useCallback((worldId, levelId, layerId, patch) => {
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      return {
+        ...s,
+        levels: (s.levels || []).map(l => {
+          if (l.id !== levelId) return l;
+          return {
+            ...l,
+            backgrounds: (l.backgrounds || []).map(b => b.id === layerId ? { ...b, ...patch } : b),
+          };
+        }),
+      };
+    }));
+  }, [updateScreens]);
+
+  const removeBackgroundLayer = useCallback((worldId, levelId, layerId) => {
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      return {
+        ...s,
+        levels: (s.levels || []).map(l => {
+          if (l.id !== levelId) return l;
+          return { ...l, backgrounds: (l.backgrounds || []).filter(b => b.id !== layerId) };
+        }),
+      };
+    }));
+  }, [updateScreens]);
+
+  const moveBackgroundLayer = useCallback((worldId, levelId, layerId, direction) => {
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      return {
+        ...s,
+        levels: (s.levels || []).map(l => {
+          if (l.id !== levelId) return l;
+          const layers = [...(l.backgrounds || [])];
+          const i = layers.findIndex(b => b.id === layerId);
+          if (i < 0) return l;
+          const j = direction === 'up' ? i - 1 : i + 1;
+          if (j < 0 || j >= layers.length) return l;
+          [layers[i], layers[j]] = [layers[j], layers[i]];
+          return { ...l, backgrounds: layers };
         }),
       };
     }));
@@ -590,7 +776,7 @@ function App() {
 
   // ── Defaults by type ────────────────────────────────────────────────────
   const getDefaultProps = type => ({
-    Window: { title: 'Window1', width: 400, height: '', bgColor: '', textColor: '', borderColor: '', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' }, staggered: false },
+    Window: { title: 'Window1', width: 400, height: '', bgColor: '', textColor: '', borderColor: '', bgImage: '', bgImageFit: 'cover', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' }, staggered: false },
     Frame: { title: 'Frame1', width: 300, height: '', borderStyle: 'single', bgColor: '', textColor: '', borderColor: '', fontSize: 12, alignment: 'left', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
     Row: { layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fill', heightMode: 'hug' } },
     Button: { text: 'Button1', bgColor: '', textColor: '', borderColor: '', width: 80, disabled: false, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
@@ -1085,9 +1271,19 @@ function App() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const tagName = e.target?.tagName;
         if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || e.target?.isContentEditable || e.target?.closest('[contenteditable="true"]')) return;
-        
+
         e.preventDefault();
-        deleteComponent(selectedIds);
+        // Route entity deletes to deleteEntities; component deletes to deleteComponent.
+        const entityIds = selectedIds.filter(id =>
+          (activeLevel?.entities || []).some(en => en.id === id)
+        );
+        if (entityIds.length > 0 && activeLevel && activeScreen) {
+          deleteEntities(activeScreen.id, activeLevel.id, entityIds);
+          const compIds = selectedIds.filter(id => !entityIds.includes(id));
+          if (compIds.length > 0) deleteComponent(compIds);
+        } else {
+          deleteComponent(selectedIds);
+        }
       }
       if ((e.key === 'd' || e.key === 'D') && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
@@ -1118,7 +1314,7 @@ function App() {
 
     window.addEventListener('keydown', handleShortcuts);
     return () => window.removeEventListener('keydown', handleShortcuts);
-  }, [selectedIds, deleteComponent, duplicateComponent, copyComponent, pasteComponent, undo, redo]);
+  }, [selectedIds, deleteComponent, duplicateComponent, copyComponent, pasteComponent, undo, redo, activeLevel, activeScreen, deleteEntities]);
 
 
 
@@ -1133,7 +1329,7 @@ function App() {
 
   // Load global settings from server
   useEffect(() => {
-    fetch('/api/settings')
+    apiFetch('/api/settings')
       .then(res => res.json())
       .then(data => {
         if (data.builderName) setBuilderName(data.builderName);
@@ -1147,7 +1343,7 @@ function App() {
   useEffect(() => {
     if (isInitialLoading.current) return;
     const settings = { builderName, apiKey, apiUrl };
-    fetch('/api/settings', {
+    apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings)
@@ -1162,11 +1358,11 @@ function App() {
     
     isInitialLoading.current = true;
     Promise.all([
-      fetch(`/api/projects/${currentProject.id}`).then(r => {
+      apiFetch(`/api/projects/${currentProject.id}`).then(r => {
         if (!r.ok) throw new Error('Not found');
         return r.json();
       }),
-      fetch(`/api/projects/${currentProject.id}/assets`).then(r => r.ok ? r.json() : { sprites: [], tilesets: [], sounds: [] }),
+      apiFetch(`/api/projects/${currentProject.id}/assets`).then(r => r.ok ? r.json() : { sprites: [], tilesets: [], sounds: [], backgrounds: [] }),
     ])
       .then(([data, sidecar]) => {
         if (data.screens && data.screens.length > 0) {
@@ -1181,7 +1377,7 @@ function App() {
         // Sidecar is the source of truth; if missing, fall back to inline assets
         // for projects authored before the sidecar split (cheap migration).
         const sidecarHasAny = (sidecar?.sprites?.length || sidecar?.tilesets?.length || sidecar?.sounds?.length);
-        const fallback = data.assets || { sprites: [], tilesets: [], sounds: [] };
+        const fallback = data.assets || { sprites: [], tilesets: [], sounds: [], backgrounds: [] };
         setAssetsState(sidecarHasAny ? sidecar : fallback);
         assetsDirty.current = false;
 
@@ -1220,6 +1416,13 @@ function App() {
   const handleNavigate = useCallback((comp) => {
     const p = comp.props || {};
     if (p.action === 'screen' && p.targetScreenId) {
+      const targetScreen = screens.find(s => s.id === p.targetScreenId);
+      if (targetScreen) {
+        // Switch editor mode so the target is visible in visibleScreens.
+        const targetIsWorld = targetScreen.kind === 'world';
+        if (targetIsWorld && !gameMode) setGameMode(true);
+        else if (!targetIsWorld && gameMode) setGameMode(false);
+      }
       setCurrentScreenId(p.targetScreenId);
       setSelectedIds([]);
     } else if (p.action === 'overlay' && p.targetOverlayId) {
@@ -1227,12 +1430,20 @@ function App() {
       const isCurrentlyOpen = target?.props?.isOpen;
       updateComponent(p.targetOverlayId, { isOpen: !isCurrentlyOpen });
       if (!isCurrentlyOpen) setSelectedIds([p.targetOverlayId]);
+    } else if (p.action === 'level' && p.targetLevelId) {
+      // Switch to the specified level within whichever world contains it.
+      updateScreens(prev => prev.map(s => {
+        if (s.kind !== 'world') return s;
+        if (!(s.levels || []).some(l => l.id === p.targetLevelId)) return s;
+        return { ...s, currentLevelId: p.targetLevelId };
+      }));
+      setSelectedIds([]);
     } else if (p.action === 'external' && p.href) {
       window.open(p.href, '_blank');
     } else if (p.action === 'email' && p.mailto) {
       window.location.href = `mailto:${p.mailto}`;
     }
-  }, [setCurrentScreenId, setSelectedIds, updateComponent, rows]);
+  }, [setCurrentScreenId, setSelectedIds, updateComponent, updateScreens, rows, screens, gameMode, setGameMode]);
 
   // ── Export HTML ───────────────────────────────────────────────────────────
   const escapeHtml = (value) => String(value || '')
@@ -1554,8 +1765,8 @@ function App() {
         const finalIconColor = getThemeColor(p.iconColor, '--accent');
 
         const containerStyle = {
-          width: isWidthFill ? '100%' : (isWidthHug ? 'auto' : (p.width ? `${p.width}px` : '80px')),
-          height: isHeightFill ? '100%' : (isHeightHug ? 'auto' : (p.height ? `${p.height}px` : '80px')),
+          width: isWidthFill ? '100%' : (isWidthHug ? 'auto' : (p.width > 0 ? `${p.width}px` : '80px')),
+          height: isHeightFill ? '100%' : (isHeightHug ? 'auto' : (p.height > 0 ? `${p.height}px` : '80px')),
           border: bStyle,
           display: 'flex',
           alignItems: 'center',
@@ -1727,10 +1938,11 @@ function App() {
     try {
       const t = THEMES[theme];
     
-    const screensHtml = screens.map((screen, sIdx) => {
-      const isSingleWindow = screen.rows.length === 1 && screen.rows[0].children.length === 1 && screen.rows[0].children[0].type === 'Window';
+    const screensHtml = screens.filter(s => s.kind !== 'world').map((screen, sIdx) => {
+      const rows = screen.rows || [];
+      const isSingleWindow = rows.length === 1 && rows[0].children?.length === 1 && rows[0].children[0].type === 'Window';
       
-      const rowsHtml = screen.rows.map(row => `<div class="layout-row" style="${styleObjToString({
+      const rowsHtml = rows.map(row => `<div class="layout-row" style="${styleObjToString({
         ...layoutToStyles(row.layout),
         width: '100%',
         margin: isSingleWindow ? '0' : '12px 0',
@@ -1787,11 +1999,16 @@ body {
   background: transparent !important; 
   border: none !important;
 }
-.preview-area { 
-  min-width: 0; 
-  width: 100%; 
-  flex: 1; 
-  background: transparent !important; 
+.preview-area {
+  min-width: 0;
+  width: 100%;
+  flex: 1;
+  height: auto !important;
+  background: transparent !important;
+}
+.retro-window-content {
+  flex: 1 1 auto !important;
+  min-height: 40px !important;
 }
 .layout-row, .retro-row, .export-wrapper { 
   background: transparent !important; 
@@ -2013,7 +2230,7 @@ ${css}
     setActiveWindow(null);
     setDatabase({ tables: [], data: {} });
     setGameMode(false);
-    setAssetsState({ sprites: [], tilesets: [], sounds: [] });
+    setAssetsState({ sprites: [], tilesets: [], sounds: [], backgrounds: [] });
     assetsDirty.current = false;
     setShowProjects(false);
     setShowNewProjectModal(false);
@@ -2026,7 +2243,7 @@ ${css}
 
   const loadProject = async (id) => {
     try {
-      const res = await fetch(`/api/projects/${id}`);
+      const res = await apiFetch(`/api/projects/${id}`);
       if (!res.ok) return;
       const data = await res.json();
       setCurrentProject({ id: data.id, name: data.name });
@@ -2039,7 +2256,7 @@ ${css}
   const deleteProject = async (id) => {
     if (!confirm('Delete project?')) return;
     try {
-      await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/projects/${id}`, { method: 'DELETE' });
       if (currentProject.id === id) {
         isInitialLoading.current = true;
         setCurrentProject({ id: 'default', name: 'Untitled' });
@@ -2049,7 +2266,7 @@ ${css}
         setActiveWindow(null);
         setDatabase({ tables: [], data: {} });
         setGameMode(false);
-        setAssetsState({ sprites: [], tilesets: [], sounds: [] });
+        setAssetsState({ sprites: [], tilesets: [], sounds: [], backgrounds: [] });
         assetsDirty.current = false;
         
         setTimeout(() => {
@@ -2064,11 +2281,11 @@ ${css}
 
   const renameProject = async (id, name) => {
     try {
-      const res = await fetch(`/api/projects/${id}`);
+      const res = await apiFetch(`/api/projects/${id}`);
       if (!res.ok) return;
       const data = await res.json();
       const updated = { ...data, name };
-      await fetch('/api/projects', {
+      await apiFetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated)
@@ -2179,10 +2396,10 @@ ${css}
           <button className="toolbar-btn" onClick={() => setShowProjects(!showProjects)}>Projects</button>
           <button className="toolbar-btn" onClick={() => selectedIds.length > 0 && duplicateComponent(selectedIds)} disabled={selectedIds.length === 0}>Duplicate</button>
           <button className="toolbar-btn" onClick={() => setShowSettings(true)} title="Settings" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ 
-              width: 16, 
-              height: 16, 
-              backgroundColor: 'currentColor', 
+            <div style={{
+              width: 16,
+              height: 16,
+              backgroundColor: 'currentColor',
               maskImage: 'url(/src/img/icons/imgi_17_gear.svg)',
               WebkitMaskImage: 'url(/src/img/icons/imgi_17_gear.svg)',
               maskSize: 'contain',
@@ -2191,6 +2408,16 @@ ${css}
               WebkitMaskRepeat: 'no-repeat'
             }} />
           </button>
+          {currentUser && (
+            <button
+              className="toolbar-btn"
+              onClick={handleLogout}
+              title={`Signed in as ${currentUser.email}`}
+              style={{ fontSize: 11, opacity: 0.7 }}
+            >
+              {currentUser.email.split('@')[0]} ✕
+            </button>
+          )}
         </div>
 
         <div className="main-layout" style={{ position: 'relative' }}>
@@ -2203,7 +2430,7 @@ ${css}
             </>
           )}
           <Toolbox gameMode={gameMode} />
-          <div className="canvas-container" style={{ position: 'relative', overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div ref={canvasContainerRef} className="canvas-container" style={{ position: 'relative', overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
             {gameMode && activeScreen?.kind === 'world' && (
               <LevelTabs
                 world={activeScreen}
@@ -2213,7 +2440,17 @@ ${css}
                 onDeleteLevel={deleteLevel}
                 onDuplicateLevel={duplicateLevel}
                 layer={levelLayer}
-                onLayerChange={setLevelLayer}
+                onLayerChange={(k) => {
+                  setLevelLayer(k);
+                  setIsPlaying(false);
+                  if (activeScreen?.id && activeLevel?.id) {
+                    updateLevel(activeScreen.id, activeLevel.id, { editorLayer: k });
+                  }
+                }}
+                canPlay={!!activeLevel}
+                isPlaying={isPlaying}
+                onTogglePlay={() => { setPaintBrush(null); setIsPlaying(p => !p); }}
+                onUpdateLevelType={(levelId, lt) => activeScreen?.id && updateLevel(activeScreen.id, levelId, { levelType: lt })}
               />
             )}
             {!activeScreen && (
@@ -2230,17 +2467,27 @@ ${css}
                 </div>
               </div>
             )}
-            {activeLevel && levelLayer === 'game' ? (
+            {activeLevel && isPlaying ? (
+              <RuntimeView
+                world={activeScreen}
+                assets={assets}
+                onStop={() => setIsPlaying(false)}
+                viewMode={viewMode}
+                activeLevelId={activeLevel?.id}
+              />
+            ) : activeLevel && levelLayer === 'game' ? (
               <LevelCanvas
                 level={activeLevel}
                 worldId={activeScreen.id}
                 assets={assets}
                 selectedIds={selectedIds}
-                onSelectEntity={(id, shift) => selectRow(id, shift)}
+                onSelectEntity={(id, shift) => { selectRow(id, shift); setPaintBrush(null); }}
                 onDeselect={() => setSelectedIds([])}
                 onAddEntity={(type, position) => addEntity(activeScreen.id, activeLevel.id, type, position)}
                 onMoveEntity={(id, position) => updateEntity(activeScreen.id, activeLevel.id, id, { position })}
                 onDeleteEntities={(ids) => deleteEntities(activeScreen.id, activeLevel.id, ids)}
+                paintBrush={paintBrush}
+                onUpdateLevel={(patch) => updateLevel(activeScreen.id, activeLevel.id, patch)}
               />
             ) : (
             <Canvas
@@ -2368,14 +2615,16 @@ ${css}
             themeColors={THEMES[theme]}
             gameMode={gameMode}
             assets={assets}
-            selectedLevel={
-              activeScreen?.kind === 'world' && selectedLevelId
-                ? (activeScreen.levels || []).find(l => l.id === selectedLevelId) || null
-                : null
-            }
+            selectedLevel={(levelLayer === 'game' && activeLevel) ? activeLevel : null}
             onUpdateLevel={(levelId, patch) => activeScreen?.id && updateLevel(activeScreen.id, levelId, patch)}
             selectedEntity={selectedEntity}
             onUpdateEntity={(entityId, patch) => activeLevel && updateEntity(activeScreen.id, activeLevel.id, entityId, patch)}
+            paintBrush={paintBrush}
+            onSetPaintBrush={setPaintBrush}
+            onAddBackgroundLayer={(assetId) => activeLevel && addBackgroundLayer(activeScreen.id, activeLevel.id, assetId)}
+            onUpdateBackgroundLayer={(layerId, patch) => activeLevel && updateBackgroundLayer(activeScreen.id, activeLevel.id, layerId, patch)}
+            onRemoveBackgroundLayer={(layerId) => activeLevel && removeBackgroundLayer(activeScreen.id, activeLevel.id, layerId)}
+            onMoveBackgroundLayer={(layerId, direction) => activeLevel && moveBackgroundLayer(activeScreen.id, activeLevel.id, layerId, direction)}
           />
         </div>
 
@@ -2546,7 +2795,62 @@ ${css}
             assets={assets}
             setAssets={setAssets}
             onClose={() => setShowSpriteSheetManager(false)}
+            setConfirmModal={setConfirmModal}
           />
+        )}
+
+        {/* Login Modal */}
+        {showLogin && (
+          <div className="projects-overlay" style={{ zIndex: 99999 }}>
+            <div className="projects-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 360 }}>
+              <div className="modal-titlebar">
+                <span className="modal-title">[ TUIFY — Sign In ]</span>
+              </div>
+              <div className="modal-body">
+                <form onSubmit={handleLogin}>
+                  <div className="property-group" style={{ marginBottom: 12 }}>
+                    <label style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--text-dim)' }}>EMAIL</label>
+                    <input
+                      type="email"
+                      value={loginEmail}
+                      onChange={e => setLoginEmail(e.target.value)}
+                      placeholder="admin@tuify.app"
+                      autoFocus
+                      required
+                      style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div className="property-group" style={{ marginBottom: 16 }}>
+                    <label style={{ display: 'block', marginBottom: 4, fontSize: 11, color: 'var(--text-dim)' }}>PASSWORD</label>
+                    <input
+                      type="password"
+                      value={loginPassword}
+                      onChange={e => setLoginPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  {loginError && (
+                    <div style={{ color: '#ff4444', fontSize: 12, marginBottom: 12, fontFamily: 'monospace' }}>
+                      {loginError}
+                    </div>
+                  )}
+                  <div className="modal-divider" />
+                  <div style={{ marginTop: 12, textAlign: 'right' }}>
+                    <button
+                      type="submit"
+                      className="modal-action-btn"
+                      disabled={loginLoading}
+                      style={{ background: 'var(--accent)', color: 'var(--bg)', minWidth: 80 }}
+                    >
+                      {loginLoading ? 'Signing in...' : 'Sign In'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Confirm Modal — inside app div so theme CSS variables work */}
