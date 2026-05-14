@@ -8,6 +8,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import GIF from 'gif.js';
 import gifWorkerUrl from 'gif.js/dist/gif.worker.js?url';
 import { loadMaskedImage, pickColorAt } from '../lib/imageMask';
+import { uploadAsset } from '../lib/assetUpload';
 import { NumericInput } from '../lib/inputs';
 
 const mkId = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -166,6 +167,15 @@ function readFileAsDataUrl(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+async function readOrUpload(file, type) {
+  try {
+    const { url } = await uploadAsset(file, type);
+    return url;
+  } catch {
+    return readFileAsDataUrl(file);
+  }
 }
 
 // Frames-list input. Same idea as NumericInput but for comma-separated
@@ -661,7 +671,7 @@ function SpriteSheetsTab({ sheets, onChange, confirmDelete }) {
   const selected = sheets.find(s => s.id === selectedId) || null;
 
   const importSheet = async (file) => {
-    const src = await readFileAsDataUrl(file);
+    const src = await readOrUpload(file, 'sprite');
     const id = mkId();
     const sheet = {
       id,
@@ -775,7 +785,7 @@ function SpriteSheetsTab({ sheets, onChange, confirmDelete }) {
                   type="file" accept="image/png,image/jpeg" style={{ display: 'none' }}
                   onChange={async (e) => {
                     if (!e.target.files?.[0]) return;
-                    const src = await readFileAsDataUrl(e.target.files[0]);
+                    const src = await readOrUpload(e.target.files[0], 'sprite');
                     updateSheet(selected.id, { src });
                     e.target.value = '';
                   }}
@@ -949,7 +959,7 @@ function TilesetsTab({ tilesets, onChange, confirmDelete }) {
   const selected = tilesets.find(t => t.id === selectedId) || null;
 
   const importTileset = async (file) => {
-    const src = await readFileAsDataUrl(file);
+    const src = await readOrUpload(file, 'tileset');
     const id = mkId();
     onChange(prev => [...prev, {
       id, kind: 'tileset',
@@ -1052,7 +1062,7 @@ function TilesetsTab({ tilesets, onChange, confirmDelete }) {
                   type="file" accept="image/png,image/jpeg" style={{ display: 'none' }}
                   onChange={async (e) => {
                     if (!e.target.files?.[0]) return;
-                    const src = await readFileAsDataUrl(e.target.files[0]);
+                    const src = await readOrUpload(e.target.files[0], 'tileset');
                     updateTileset(selected.id, { src });
                     e.target.value = '';
                   }}
@@ -1175,7 +1185,7 @@ function cellOriginInline(frame, col, row) {
 // Levels. No grid configuration — they're consumed whole.
 function BackgroundsTab({ backgrounds, onChange, confirmDelete }) {
   const importBg = async (file) => {
-    const src = await readFileAsDataUrl(file);
+    const src = await readOrUpload(file, 'background');
     onChange(prev => [...prev, {
       id: mkId(), kind: 'background',
       name: file.name.replace(/\.[^.]+$/, ''),
@@ -1222,7 +1232,7 @@ function BackgroundsTab({ backgrounds, onChange, confirmDelete }) {
                   type="file" accept="image/*" style={{ display: 'none' }}
                   onChange={async (e) => {
                     if (!e.target.files?.[0]) return;
-                    const src = await readFileAsDataUrl(e.target.files[0]);
+                    const src = await readOrUpload(e.target.files[0], 'background');
                     updateBg(b.id, { src });
                     e.target.value = '';
                   }}
@@ -1244,7 +1254,7 @@ function BackgroundsTab({ backgrounds, onChange, confirmDelete }) {
 // ─── Sounds tab ──────────────────────────────────────────────────────────
 function SoundsTab({ sounds, onChange, confirmDelete }) {
   const importSound = async (file) => {
-    const src = await readFileAsDataUrl(file);
+    const src = await readOrUpload(file, 'sound');
     onChange(prev => [...prev, { id: mkId(), kind: 'sound', name: file.name.replace(/\.[^.]+$/, ''), src }]);
   };
   const updateSound = (id, patch) => onChange(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));

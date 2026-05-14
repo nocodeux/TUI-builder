@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { projectsRouter } from './routes/projects.js';
 import { settingsRouter } from './routes/settings.js';
 import { authRouter } from './routes/auth.js';
+import { assetsRouter } from './routes/assets.js';
 import { requireAuth } from './middleware/auth.js';
 import { runSchema, isAvailable } from './db/index.js';
 
@@ -34,12 +35,17 @@ app.use(cors({
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
+// Serve uploaded assets (local driver)
+const uploadsPath = path.resolve(process.cwd(), process.env.STORAGE_PATH || './uploads');
+app.use('/uploads', express.static(uploadsPath));
+
 // Auth routes (public — no requireAuth)
 app.use('/api/auth', authRouter);
 
 // Protected API routes
 app.use('/api/projects', requireAuth, projectsRouter);
 app.use('/api/settings', requireAuth, settingsRouter);
+app.use('/api/assets', assetsRouter);
 
 // Health check
 app.get('/health', (_req, res) => {

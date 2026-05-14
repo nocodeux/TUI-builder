@@ -13,6 +13,7 @@ import IconPicker from './IconPicker';
 import { resolveTilesetView, cellOrigin, listTileSources } from '../lib/tilesetView';
 import { NumericInput } from '../lib/inputs';
 import { loadMaskedImage } from '../lib/imageMask';
+import { uploadAsset } from '../lib/assetUpload';
 
 const mkId = () => Math.random().toString(36).substring(2, 9);
 
@@ -1854,19 +1855,24 @@ function Inspector({
                   type="file"
                   style={{ display: 'none' }}
                   accept="image/*"
-                  onChange={e => {
+                  onChange={async e => {
                     const file = e.target.files?.[0];
                     if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = (ev) => updateAndCommit('bgImage', ev.target.result);
-                    reader.readAsDataURL(file);
+                    try {
+                      const { url } = await uploadAsset(file, 'image');
+                      updateAndCommit('bgImage', url);
+                    } catch {
+                      const reader = new FileReader();
+                      reader.onload = (ev) => updateAndCommit('bgImage', ev.target.result);
+                      reader.readAsDataURL(file);
+                    }
                   }}
                 />
               </label>
               {localProps.bgImage && (
                 <button className="small-btn" onClick={() => updateAndCommit('bgImage', '')} style={{ color: '#ff5566', borderColor: '#ff5566' }}>clear</button>
               )}
-              {localProps.bgImage?.startsWith('data:') && <span style={{ fontSize: 8, color: 'var(--accent)' }}>Base64 Loaded</span>}
+              {localProps.bgImage?.startsWith('data:') && <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>local</span>}
             </div>
           </div>
         </div>
@@ -2208,31 +2214,35 @@ function Inspector({
                   type="file" 
                   style={{ display: 'none' }} 
                   accept="image/*,.gif"
-                  onChange={e => {
+                  onChange={async e => {
                     const file = e.target.files[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = (ev) => {
-                        const res = ev.target.result;
-                        updateAndCommit('src', res);
-                        const img = new window.Image();
-                        img.onload = () => {
-                          // SVGs often report 1×1 or 0×0 intrinsic px size (viewBox-only).
-                          // Only apply dimensions when they look like real pixel art/photos.
-                          if (img.width > 4 && img.height > 4) {
-                            updateAndCommit('aspectRatio', img.width / img.height);
-                            updateAndCommit('width', img.width);
-                            updateAndCommit('height', img.height);
-                          }
-                        };
-                        img.src = res;
-                      };
-                      reader.readAsDataURL(file);
+                    if (!file) return;
+                    let src;
+                    try {
+                      const { url } = await uploadAsset(file, 'image');
+                      src = url;
+                    } catch {
+                      src = await new Promise((res, rej) => {
+                        const r = new FileReader();
+                        r.onload = () => res(r.result);
+                        r.onerror = rej;
+                        r.readAsDataURL(file);
+                      });
                     }
+                    updateAndCommit('src', src);
+                    const img = new window.Image();
+                    img.onload = () => {
+                      if (img.width > 4 && img.height > 4) {
+                        updateAndCommit('aspectRatio', img.width / img.height);
+                        updateAndCommit('width', img.width);
+                        updateAndCommit('height', img.height);
+                      }
+                    };
+                    img.src = src;
                   }}
                 />
               </label>
-              {localProps.src?.startsWith('data:') && <span style={{ fontSize: 8, color: 'var(--accent)' }}>Base64 Loaded</span>}
+              {localProps.src?.startsWith('data:') && <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>local</span>}
             </div>
           </div>
         </div>
