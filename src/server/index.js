@@ -106,14 +106,6 @@ app.listen(PORT, async () => {
     try {
       await runSchema();
       console.log('[db] PostgreSQL connected ✓');
-      // Claim ownerless projects (migrated before admin had a DB userId) for the first admin
-      await query(`
-        UPDATE projects SET owner_id = (
-          SELECT id FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1
-        )
-        WHERE owner_id IS NULL
-          AND EXISTS (SELECT 1 FROM users WHERE role = 'admin')
-      `);
     } catch (err) {
       console.warn('[db] PostgreSQL unavailable — using filesystem fallback:', err.message);
     }

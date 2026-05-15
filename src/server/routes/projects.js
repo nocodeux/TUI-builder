@@ -198,6 +198,26 @@ projectsRouter.delete('/:id/assets', async (req, res) => {
   }
 });
 
+// ─── Admin: claim orphan projects ─────────────────────────────────────────────
+// POST /api/projects/admin/claim-orphans
+// One-time fix: assign projects with owner_id = NULL to the calling admin user.
+projectsRouter.post('/admin/claim-orphans', async (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  if (!await useDb()) return res.status(503).json({ error: 'Database required' });
+  const owner = ownerId(req);
+  if (!owner) return res.status(400).json({ error: 'Admin user has no userId in token — log out and back in first' });
+  try {
+    const { rowCount } = await query(
+      'UPDATE projects SET owner_id = $1 WHERE owner_id IS NULL',
+      [owner]
+    );
+    res.json({ success: true, claimed: rowCount });
+  } catch (err) {
+    console.error('[projects] claim-orphans error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Admin: toggle demo flag ───────────────────────────────────────────────────
 // PATCH /api/projects/:id/demo  { isDemo: bool, demoOrder?: number }
 projectsRouter.patch('/:id/demo', async (req, res) => {
