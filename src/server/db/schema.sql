@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS published_pages (
   UNIQUE (owner_id, slug)
 );
 ALTER TABLE published_pages ADD COLUMN IF NOT EXISTS publish_mode TEXT NOT NULL DEFAULT 'game';
+ALTER TABLE published_pages ADD COLUMN IF NOT EXISTS html_content TEXT;
 -- Make world_id nullable to support page-only publishes
 ALTER TABLE published_pages ALTER COLUMN world_id DROP NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_published_owner ON published_pages(owner_id);

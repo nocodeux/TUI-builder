@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { projectsRouter } from './routes/projects.js';
 import { settingsRouter } from './routes/settings.js';
@@ -71,7 +70,7 @@ app.get('/:username/:slug', async (req, res, next) => {
   if (!await isAvailable()) return next();
   try {
     const { rows } = await query(
-      `SELECT pp.html_path, pp.is_public, pp.visit_count
+      `SELECT pp.html_content, pp.is_public
        FROM published_pages pp
        JOIN users u ON u.id = pp.owner_id
        WHERE u.username = $1 AND pp.slug = $2`,
@@ -80,11 +79,11 @@ app.get('/:username/:slug', async (req, res, next) => {
     if (!rows.length) return next();
     const page = rows[0];
     if (!page.is_public) return res.status(403).send('This page is private');
-    if (!page.html_path || !fs.existsSync(page.html_path)) return next();
+    if (!page.html_content) return next();
     // Increment visit counter (fire-and-forget)
     query('UPDATE published_pages SET visit_count = visit_count + 1 WHERE owner_id = (SELECT id FROM users WHERE username = $1) AND slug = $2', [username, slug]).catch(() => {});
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.sendFile(page.html_path);
+    res.send(page.html_content);
   } catch (err) {
     console.error('[serve]', err.message);
     next();

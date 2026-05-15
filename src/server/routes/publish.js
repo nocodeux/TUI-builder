@@ -1,13 +1,7 @@
 import express from 'express';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { query, isAvailable } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { generateGameHtml, generatePageHtml, generateCombinedHtml } from '../lib/gameExport.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const publishedDir = path.resolve(__dirname, '../../../published');
 
 export const publishRouter = express.Router();
 
@@ -27,12 +21,6 @@ function deriveUsername(user) {
   if (user.username) return user.username;
   const base = slugify(user.display_name || user.email.split('@')[0]);
   return base || 'user';
-}
-
-function ensurePublishedDir(userId, slug) {
-  const dir = path.join(publishedDir, userId, slug);
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
 }
 
 function serverOrigin(req) {
@@ -119,33 +107,31 @@ publishRouter.post('/', requireAuth, async (req, res) => {
       [userId, slug]
     );
 
-    // Generate and store HTML
+    // Generate HTML
     const origin = serverOrigin(req);
-    const dir = ensurePublishedDir(userId, slug);
-    const htmlPath = path.join(dir, 'index.html');
     const resolvedTitle = title || worlds?.[0]?.name || 'Untitled';
-
+    let htmlContent;
     if (publishMode === 'game') {
-      fs.writeFileSync(htmlPath, generateGameHtml({ worlds, assets: assetsData, title: resolvedTitle, description, origin }), 'utf-8');
+      htmlContent = generateGameHtml({ worlds, assets: assetsData, title: resolvedTitle, description, origin });
     } else if (publishMode === 'page') {
-      fs.writeFileSync(htmlPath, generatePageHtml({ pageHtml, origin }), 'utf-8');
+      htmlContent = generatePageHtml({ pageHtml, origin });
     } else { // page+game
-      fs.writeFileSync(htmlPath, generateCombinedHtml({ pageHtml, worlds, assets: assetsData, title: resolvedTitle, description, origin }), 'utf-8');
+      htmlContent = generateCombinedHtml({ pageHtml, worlds, assets: assetsData, title: resolvedTitle, description, origin });
     }
 
-    // Upsert published_pages record (world_id is null for game mode — the game is all worlds)
+    // Upsert published_pages record — HTML stored in DB (no filesystem dependency)
     if (existing.length) {
       await query(
-        `UPDATE published_pages SET title=$1, description=$2, is_public=$3, html_path=$4,
+        `UPDATE published_pages SET title=$1, description=$2, is_public=$3, html_content=$4,
          updated_at=now(), world_id=$5, source_id=$6, publish_mode=$7
          WHERE owner_id=$8 AND slug=$9`,
-        [resolvedTitle, description || null, isPublic, htmlPath, null, sourceId, publishMode, userId, slug]
+        [resolvedTitle, description || null, isPublic, htmlContent, null, sourceId, publishMode, userId, slug]
       );
     } else {
       await query(
-        `INSERT INTO published_pages (owner_id, source_id, world_id, slug, title, description, is_public, html_path, publish_mode)
+        `INSERT INTO published_pages (owner_id, source_id, world_id, slug, title, description, is_public, html_content, publish_mode)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [userId, sourceId, null, slug, resolvedTitle, description || null, isPublic, htmlPath, publishMode]
+        [userId, sourceId, null, slug, resolvedTitle, description || null, isPublic, htmlContent, publishMode]
       );
     }
 
@@ -173,16 +159,11 @@ publishRouter.delete('/:slug', requireAuth, async (req, res) => {
   const { slug } = req.params;
   if (!await isAvailable()) return res.status(503).json({ error: 'Database required' });
   const userId = req.user.userId;
-  const { rows } = await query(
-    'DELETE FROM published_pages WHERE owner_id = $1 AND slug = $2 RETURNING html_path',
+  const { rowCount } = await query(
+    'DELETE FROM published_pages WHERE owner_id = $1 AND slug = $2',
     [userId, slug]
   );
-  if (!rows.length) return res.status(404).json({ error: 'Not found' });
-  // Remove HTML file
-  const htmlPath = rows[0].html_path;
-  if (htmlPath && fs.existsSync(htmlPath)) {
-    fs.rmSync(path.dirname(htmlPath), { recursive: true, force: true });
-  }
+  if (!rowCount) return res.status(404).json({ error: 'Not found' });
   res.json({ success: true });
 });
 
