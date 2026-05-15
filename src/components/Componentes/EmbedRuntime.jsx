@@ -9,6 +9,77 @@ import React, { useEffect, useRef, useState } from 'react';
 import { GameRuntime } from '../../runtime/gameRuntime';
 import GameHUD from '../../runtime/GameHUD';
 
+// ── Mobile touch controls ──────────────────────────────────────────────────────
+const BTN = {
+  width: 46, height: 46,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: 'rgba(255,255,255,0.10)',
+  border: '1px solid rgba(255,255,255,0.22)',
+  borderRadius: 4,
+  fontSize: 16, color: 'rgba(255,255,255,0.75)',
+  fontFamily: 'monospace',
+  userSelect: 'none',
+  WebkitUserSelect: 'none',
+  touchAction: 'none',
+  boxSizing: 'border-box',
+  flexShrink: 0,
+};
+const BTN_SM = { ...BTN, fontSize: 9, letterSpacing: 0.5 };
+
+function MobileControls({ rtRef }) {
+  const mk = (label, action, small = false) => {
+    const stop = (e, active) => {
+      e.preventDefault();
+      e.stopPropagation();
+      rtRef.current?.setInput(action, active);
+    };
+    return (
+      <div
+        style={small ? BTN_SM : BTN}
+        onTouchStart={e => stop(e, true)}
+        onTouchEnd={e => stop(e, false)}
+        onTouchCancel={e => stop(e, false)}
+      >
+        {label}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{
+      position: 'absolute', bottom: 0, left: 0, right: 0,
+      display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
+      padding: '6px 10px 8px',
+      background: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.55))',
+      pointerEvents: 'none',
+      zIndex: 20,
+    }}>
+      {/* D-pad */}
+      <div style={{
+        pointerEvents: 'auto',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 46px)',
+        gridTemplateRows: 'repeat(2, 46px)',
+        gap: 4,
+      }}>
+        <span /> {mk('↑', 'up')} <span />
+        {mk('←', 'left')} {mk('↓', 'down')} {mk('→', 'right')}
+      </div>
+      {/* Action buttons */}
+      <div style={{
+        pointerEvents: 'auto',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, 46px)',
+        gridTemplateRows: 'repeat(2, 46px)',
+        gap: 4,
+      }}>
+        {mk('⇧', 'dash')} {mk('SPC', 'jump', true)}
+        {mk('E', 'interact')} {mk('Z', 'attack')}
+      </div>
+    </div>
+  );
+}
+
 const KEY_MAP = {
   ArrowLeft: 'left',  a: 'left',  A: 'left',
   ArrowRight: 'right', d: 'right', D: 'right',
@@ -23,10 +94,12 @@ const KEY_MAP = {
 // scaling: 'fit' | 'fill' | 'fixed'
 // maintainAspect: boolean (ignored when scaling='fixed')
 // onNavigateExternal: optional — called when navigation targets a different world/screen
-export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainAspect = true, onNavigateExternal }) {
+// nativeW/nativeH: explicit pixel dims passed by GameEmbed (world-canonical); per-level dims used as fallback
+export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainAspect = true, onNavigateExternal, nativeW: propNativeW, nativeH: propNativeH }) {
   const levels = world?.levels || [];
 
   const [currentLevelId, setCurrentLevelId] = useState(() => levels[0]?.id || null);
+  const isTouch = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
   // Reset to first level whenever the world changes.
   const worldIdRef = useRef(world?.id);
@@ -42,9 +115,10 @@ export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainA
   const showGame  = levelType === 'game' || levelType === 'game+hud';
   const showHUD   = levelType === 'hud-only' || levelType === 'game+hud';
 
-  // Native pixel dimensions of the current level's canvas
-  const nativeW = (level?.viewportCols || 20) * (level?.tileMap?.tileWidth  || 32);
-  const nativeH = (level?.viewportRows || 14) * (level?.tileMap?.tileHeight || 32);
+  // Per-level native pixel dimensions — always use the current level's viewport/tile config.
+  // propNativeW/propNativeH (world-canonical) are only a last-resort fallback (level is null).
+  const nativeW = level ? (level.viewportCols || 20) * (level.tileMap?.tileWidth  || 32) : (propNativeW || 640);
+  const nativeH = level ? (level.viewportRows || 14) * (level.tileMap?.tileHeight || 32) : (propNativeH || 360);
 
   const wrapRef   = useRef(null);
   const canvasRef = useRef(null);
@@ -114,8 +188,10 @@ export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainA
       const canvas = canvasRef.current;
       if (!canvas) return;
 
-      const cw = wrap.clientWidth  || nativeW;
-      const ch = wrap.clientHeight || nativeH;
+      // Container width is responsive; container height is auto (content-driven by the
+      // placeholder div). Use nativeH as the authoritative vertical container size.
+      const cw = wrap.clientWidth || nativeW;
+      const ch = nativeH;
 
       if (scaling === 'fixed') {
         canvas.style.width  = `${nativeW}px`;
@@ -125,11 +201,9 @@ export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainA
 
       let displayW, displayH;
       if (!maintainAspect) {
-        // Stretch: distort to fill container exactly
         displayW = cw;
         displayH = ch;
       } else if (scaling === 'fill') {
-        // Cover: scale up so both dimensions >= container (may crop)
         const s = Math.max(cw / nativeW, ch / nativeH);
         displayW = Math.round(nativeW * s);
         displayH = Math.round(nativeH * s);
@@ -152,41 +226,43 @@ export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainA
 
   if (!level) return null;
 
+  const isHudOnly = !showGame && showHUD;
+
+  // Always auto-height wrapper — content drives height in normal flow.
+  // For game levels a hidden placeholder div establishes nativeH in normal flow;
+  // the actual canvas and HUD overlay that placeholder absolutely.
   return (
     <div
       ref={wrapRef}
-      style={{
-        position: 'relative',
-        width: '100%',
-        height: '100%',
-        overflow: 'hidden',
-        background: '#000',
-        cursor: 'default',
-      }}
+      style={{ position: 'relative', width: '100%', cursor: 'default' }}
       onClick={() => canvasRef.current?.focus({ preventScroll: true })}
     >
-      {/* Flex-center layer: keeps the canvas centred so letterbox bars are symmetric */}
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        {showGame && (
-          <canvas
-            ref={canvasRef}
-            tabIndex={0}
-            style={{
-              display: 'block',
-              imageRendering: 'pixelated',
-              outline: 'none',
-              flexShrink: 0,
-            }}
-          />
-        )}
-      </div>
+      {showGame && (
+        <>
+          {/* Normal-flow placeholder: pushes container to nativeH so gameAreaStyle (auto height) sizes correctly. */}
+          <div style={{ width: nativeW, height: nativeH, visibility: 'hidden', pointerEvents: 'none' }} />
+          {/* Canvas centred over the placeholder via absolute overlay */}
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <canvas
+              ref={canvasRef}
+              tabIndex={0}
+              style={{ display: 'block', imageRendering: 'pixelated', outline: 'none', flexShrink: 0 }}
+            />
+          </div>
+          {/* Touch controls — shown only on touch devices, sit in the bottom letterbox area */}
+          {isTouch && <MobileControls rtRef={rtRef} />}
+        </>
+      )}
 
-      {/* HUD overlay — rendered at position:absolute so it covers the game area */}
+      {/* HUD:
+          - hud-only: block mode, normal flow, drives container height
+          - game+hud: overlay mode, position:absolute over canvas */}
       {showHUD && (
         <GameHUD
           rows={level?.rows || []}
           onNavigateLevel={handleNavigateLevel}
           onNavigateScreen={handleNavigateScreen}
+          overlay={!isHudOnly}
         />
       )}
     </div>

@@ -54,10 +54,10 @@ function ControlsCard() {
   );
 }
 
-function WindowFrame({ title, width, children, showControls }) {
+function WindowFrame({ title, width, children, showControls, clip = true }) {
   return (
     <div style={{ display: 'inline-flex', flexDirection: 'column', width }}>
-      <div className="retro-window" style={{ width, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="retro-window" style={{ width, display: 'flex', flexDirection: 'column', overflow: clip ? 'hidden' : 'visible' }}>
         <div className="retro-window-titlebar">
           <span className="retro-window-title">{title}</span>
           <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'monospace', opacity: 0.6 }}>▦</span>
@@ -78,6 +78,7 @@ export default function GameEmbed({
   const world  = worldId ? (screens || []).find(s => s.id === worldId && s.kind === 'world') : null;
   const levels = world?.levels || [];
 
+  // Canonical game level drives native canvas dimensions.
   const canonicalLevel =
     levels.find(l => l.levelType === 'game' || l.levelType === 'game+hud') ||
     levels[0];
@@ -92,11 +93,11 @@ export default function GameEmbed({
   const resolvedW = (width === 'auto' || !width) ? nativeW : width;
   const resolvedH = (height === 'auto' || !height) ? nativeH : height;
 
+  // gameAreaStyle never has a fixed height — EmbedRuntime drives it via:
+  //   • a normal-flow placeholder div (for game levels) so height = nativeH
+  //   • GameHUD block layout (for hud-only levels) so height = HUD content
   const gameAreaStyle = {
     width: resolvedW,
-    height: resolvedH,
-    minWidth: 0,
-    minHeight: 0,
     position: 'relative',
     overflow: 'hidden',
     background: '#0a0a0a',
@@ -109,7 +110,7 @@ export default function GameEmbed({
     const pw = (width === 'auto' || !width) ? 640 : width;
     const ph = (height === 'auto' || !height) ? 360 : height;
     const placeholder = (
-      <div style={{ ...gameAreaStyle, width: pw, height: ph, border: '1px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6 }}>
+      <div style={{ width: pw, height: ph, border: '1px dashed var(--border)', background: '#0a0a0a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6, boxSizing: 'border-box' }}>
         <div style={{ fontSize: 9, color: 'var(--text-dim)', letterSpacing: 1 }}>▦ GAME EMBED</div>
         <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>Select a world in the inspector</div>
       </div>
@@ -131,7 +132,7 @@ export default function GameEmbed({
 
   if (!world) {
     const errorContent = (
-      <div style={{ ...gameAreaStyle, border: '1px dashed var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6 }}>
+      <div style={{ width: resolvedW, height: resolvedH, border: '1px dashed var(--accent)', background: '#0a0a0a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6, boxSizing: 'border-box' }}>
         <div style={{ fontSize: 9, color: 'var(--text-dim)', letterSpacing: 1 }}>▦ GAME EMBED</div>
         <div style={{ fontSize: 13, color: 'var(--accent)' }}>{worldName || worldId}</div>
         <div style={{ fontSize: 9, color: 'var(--text-dim)', letterSpacing: 1 }}>World not found</div>
@@ -166,6 +167,8 @@ export default function GameEmbed({
         assets={assets}
         scaling={scaling}
         maintainAspect={maintainAspect}
+        nativeW={nativeW}
+        nativeH={nativeH}
       />
     </div>
   );

@@ -2076,6 +2076,54 @@ function Inspector({
           </div>
         )}
       </>);
+      case 'Row': return (<>
+        {renderColor('BACKGROUND','bgColor','#000000', true)}
+        <div className="property-divider" />
+        <div className="al-section-title">BACKGROUND IMAGE</div>
+        <div className="property-group">
+          <label>SOURCE</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <input
+              type="text"
+              value={localProps.bgImage || ''}
+              onChange={e => updateAndCommit('bgImage', e.target.value)}
+              placeholder="https://… or paste data URL"
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <label className="upload-file-label">
+                Upload File
+                <input
+                  type="file"
+                  style={{ display: 'none' }}
+                  accept="image/*"
+                  onChange={async e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const { url } = await uploadAsset(file, 'image');
+                      updateAndCommit('bgImage', url);
+                    } catch {
+                      const reader = new FileReader();
+                      reader.onload = (ev) => updateAndCommit('bgImage', ev.target.result);
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                />
+              </label>
+              {localProps.bgImage && (
+                <button className="small-btn" onClick={() => updateAndCommit('bgImage', '')} style={{ color: '#ff5566', borderColor: '#ff5566' }}>clear</button>
+              )}
+              {localProps.bgImage?.startsWith('data:') && <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>local</span>}
+            </div>
+          </div>
+        </div>
+        {localProps.bgImage && (
+          <div className="property-group">
+            <label>FIT</label>
+            <Selector value={localProps.bgImageFit || 'cover'} onChange={v => updateAndCommit('bgImageFit', v)} options={[{value:'cover',label:'Cover (crop to fill)'},{value:'contain',label:'Contain (fit inside)'},{value:'fill',label:'Fill (stretch to size)'},{value:'tile',label:'Tile (repeat)'}]} width="100%" />
+          </div>
+        )}
+      </>);
       case 'Frame': return (<>
         <div className="property-group"><label>TITLE</label><input type="text" value={localProps.title||''} onChange={e => updateAndCommit('title', e.target.value)} /></div>
         {renderNumber('width','WIDTH (px)','300')}

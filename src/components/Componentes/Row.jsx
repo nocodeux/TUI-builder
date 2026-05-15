@@ -8,6 +8,9 @@ function Row({
   onMoveChild,
   width = '100%',
   height = 'auto',
+  bgColor = '',
+  bgImage = '',
+  bgImageFit = 'cover',
 }) {
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ['COMPONENT', 'EXISTING_COMPONENT'],
@@ -47,6 +50,13 @@ function Row({
         width: fmtDim(width),
         height: fmtDim(height),
         minHeight: (height === 'auto' || !height) ? '24px' : fmtDim(height),
+        ...(bgColor ? { background: bgColor } : {}),
+        ...(bgImage ? {
+          backgroundImage: `url(${bgImage})`,
+          backgroundSize: bgImageFit === 'tile' ? 'auto' : (bgImageFit === 'fill' ? '100% 100%' : bgImageFit),
+          backgroundRepeat: bgImageFit === 'tile' ? 'repeat' : 'no-repeat',
+          backgroundPosition: 'center',
+        } : {}),
       }}
     >
       {children}
