@@ -46,6 +46,7 @@ function App() {
     { id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }
   ]);
   const [currentScreenId, setCurrentScreenId] = useState('screen-1');
+  const [editingTextId, setEditingTextId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]); // Array of IDs
   const [lastSelectedId, setLastSelectedId] = useState(null); // For shift-select ranges if needed later
   const [viewMode, setViewMode] = useState('desktop');
@@ -3254,6 +3255,12 @@ ${(() => {
               database={database}
               onNavigate={handleNavigate}
               onUpdateComponent={updateComponent}
+              editingTextId={editingTextId}
+              onStartTextEdit={id => { setEditingTextId(id); }}
+              onCommitTextEdit={(id, text) => {
+                if (text !== null) updateComponent(id, { text });
+                setEditingTextId(null);
+              }}
               onSaveRecord={(tableName, record) => {
                 setDatabase(prev => ({
                   ...prev,

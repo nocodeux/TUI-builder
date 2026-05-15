@@ -10,7 +10,7 @@
  * 5. Between-row drop zones for creating new rows
  */
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDrop, useDrag } from 'react-dnd';
 import Window from './Componentes/Window';
 import Frame from './Componentes/Frame';
@@ -49,11 +49,22 @@ const CONTAINER_TYPES = ['Window', 'Frame', 'Row', 'Tabs', 'DataRepeater', 'Form
 // ─── Draggable component with position-aware drop detection ─────────────────
 function DraggableComponent({
   comp, rowId, topRowId, index, totalSiblings, selectedIds, onSelect, onDelete, onDuplicate,
-  onAddComponent, activeWindow, onMoveComponent, rowDirection, onNavigate, onUpdateComponent, database, onSaveRecord
+  onAddComponent, activeWindow, onMoveComponent, rowDirection, onNavigate, onUpdateComponent, database, onSaveRecord,
+  editingTextId, onStartTextEdit, onCommitTextEdit,
 }) {
   const currentTopRowId = topRowId || rowId;
   const ref = useRef(null);
+  const textareaRef = useRef(null);
   const [dropIndicator, setDropIndicator] = useState(null); // 'before' | 'after' | null
+  const isEditingText = comp.type === 'Text' && editingTextId === comp.id;
+
+  useEffect(() => {
+    if (isEditingText && textareaRef.current) {
+      textareaRef.current.focus();
+      const len = textareaRef.current.value.length;
+      textareaRef.current.setSelectionRange(len, len);
+    }
+  }, [isEditingText]);
 
   const [{ isDragging }, drag] = useDrag(() => ({
     type: 'EXISTING_COMPONENT',
@@ -69,9 +80,10 @@ function DraggableComponent({
         height: rect?.height || 32,
       };
     },
+    canDrag: !isEditingText,
     collect: monitor => ({ isDragging: !!monitor.isDragging() }),
     end: () => setDropIndicator(null),
-  }), [comp.id, rowId, index, onMoveComponent]);
+  }), [comp.id, rowId, index, onMoveComponent, isEditingText]);
 
   // This component is also a drop target — detects cursor position
   const [{ isOver }, drop] = useDrop(() => ({
@@ -208,6 +220,9 @@ function DraggableComponent({
           rowDirection={comp.props?.layout?.direction || 'row'}
           onNavigate={onNavigate}
           onUpdateComponent={onUpdateComponent}
+          editingTextId={editingTextId}
+          onStartTextEdit={onStartTextEdit}
+          onCommitTextEdit={onCommitTextEdit}
         />
     ));
   };
@@ -281,15 +296,61 @@ function DraggableComponent({
         outlineOffset: '2px',
         zIndex: isSelected ? 10 : 1,
       }}
-      onClick={e => { 
-        e.stopPropagation(); 
+      onClick={e => {
+        e.stopPropagation();
         if ((e.ctrlKey || e.metaKey) && onNavigate) {
             onNavigate(comp);
         } else {
-            onSelect(comp.id, e.shiftKey); 
+            onSelect(comp.id, e.shiftKey);
+        }
+      }}
+      onDoubleClick={e => {
+        if (comp.type === 'Text' && onStartTextEdit) {
+          e.stopPropagation();
+          onSelect(comp.id);
+          onStartTextEdit(comp.id);
         }
       }}
     >
+      {/* Inline text editor overlay — shown on double-click for Text components */}
+      {isEditingText && (
+        <textarea
+          ref={textareaRef}
+          className="canvas-text-editor"
+          defaultValue={comp.props.text || ''}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 200,
+            background: 'rgba(0,0,0,0.88)',
+            border: '1px solid var(--accent)',
+            color: comp.props.textColor || 'var(--text)',
+            fontSize: `${comp.props.fontSize || 12}px`,
+            fontFamily: 'monospace',
+            textAlign: comp.props.alignment || 'left',
+            resize: 'none',
+            width: '100%',
+            height: '100%',
+            minHeight: 32,
+            padding: '4px 6px',
+            outline: 'none',
+            lineHeight: 1.4,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            boxSizing: 'border-box',
+          }}
+          onBlur={e => onCommitTextEdit && onCommitTextEdit(comp.id, e.target.value)}
+          onKeyDown={e => {
+            e.stopPropagation();
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              onCommitTextEdit && onCommitTextEdit(comp.id, null);
+            }
+          }}
+          onClick={e => e.stopPropagation()}
+          onMouseDown={e => e.stopPropagation()}
+        />
+      )}
       {/* Floating delete button for selected component */}
       {isSelected && (
         <button 
@@ -375,7 +436,8 @@ function DraggableComponent({
 // ─── Row of layout (with position-aware drop on empty area) ─────────────────
 function LayoutRow({
   row, rowIndex, selectedIds, onSelect, onDelete, onDuplicate,
-  onAddComponent, activeWindow, onMoveComponent, onDropToRow, onSelectRow, onNavigate, onUpdateComponent, database, onSaveRecord
+  onAddComponent, activeWindow, onMoveComponent, onDropToRow, onSelectRow, onNavigate, onUpdateComponent, database, onSaveRecord,
+  editingTextId, onStartTextEdit, onCommitTextEdit,
 }) {
   const layout = row.layout || { direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false };
   const rowRef = useRef(null);
@@ -507,6 +569,9 @@ function LayoutRow({
           onUpdateComponent={onUpdateComponent}
           onSaveRecord={onSaveRecord}
           database={database}
+          editingTextId={editingTextId}
+          onStartTextEdit={onStartTextEdit}
+          onCommitTextEdit={onCommitTextEdit}
         />
       ))}
 
@@ -563,7 +628,8 @@ function NewRowDropZone({ onDropNewRow, afterIndex }) {
 // ─── Main Canvas ────────────────────────────────────────────────────────────
 function Canvas({
   rows, selectedIds, onSelect, onDelete, onDuplicate, viewMode, onAddToRow, onAddNewRow,
-  onMoveComponent, onSelectRow, activeWindow, canvasPadding, database, onNavigate, onUpdateComponent, onSaveRecord
+  onMoveComponent, onSelectRow, activeWindow, canvasPadding, database, onNavigate, onUpdateComponent, onSaveRecord,
+  editingTextId, onStartTextEdit, onCommitTextEdit,
 }) {
   // Drop on empty canvas → new row
   const [{ isOver }, drop] = useDrop(() => ({
@@ -636,6 +702,9 @@ function Canvas({
                 onUpdateComponent={onUpdateComponent}
                 onSaveRecord={onSaveRecord}
                 database={database}
+                editingTextId={editingTextId}
+                onStartTextEdit={onStartTextEdit}
+                onCommitTextEdit={onCommitTextEdit}
               />
 
             {/* Between-row drop zone (after each row) */}

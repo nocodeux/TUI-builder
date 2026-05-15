@@ -2167,52 +2167,40 @@ function Inspector({
       case 'Text':
       case 'Label': {
         const wrapSelection = (tag) => {
-          const textarea = document.querySelector('.inspector-textarea');
-          if (!textarea) return;
-          const start = textarea.selectionStart;
-          const end = textarea.selectionEnd;
-          const val = localProps.text || '';
-          const before = val.substring(0, start);
-          const selection = val.substring(start, end);
-          const after = val.substring(end);
-          const newVal = `${before}[${tag}]${selection}[/${tag}]${after}`;
-          updateAndCommit('text', newVal);
-          setTimeout(() => {
-            textarea.focus();
-            textarea.setSelectionRange(start + tag.length + 2, end + tag.length + 2);
-          }, 0);
-        };
-
-        const handleKeyDown = (e) => {
-          if (e.ctrlKey || e.metaKey) {
-            if (e.key === 'b') { e.preventDefault(); wrapSelection('b'); }
-            if (e.key === 'i') { e.preventDefault(); wrapSelection('i'); }
-            if (e.key === 'u') { e.preventDefault(); wrapSelection('u'); }
-            if (e.key === 's') { e.preventDefault(); wrapSelection('s'); }
+          // Target the inline canvas textarea if active, otherwise wrap entire text
+          const textarea = document.querySelector('.canvas-text-editor');
+          if (textarea) {
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const val = textarea.value;
+            const newVal = `${val.substring(0, start)}[${tag}]${val.substring(start, end)}[/${tag}]${val.substring(end)}`;
+            // Use native setter so React's uncontrolled textarea picks up the change
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            nativeSetter.call(textarea, newVal);
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            setTimeout(() => {
+              textarea.focus();
+              textarea.setSelectionRange(start + tag.length + 2, end + tag.length + 2);
+            }, 0);
+          } else {
+            // Fallback: wrap entire text when not in inline edit mode
+            const val = localProps.text || '';
+            updateAndCommit('text', `[${tag}]${val}[/${tag}]`);
           }
         };
 
         return (<>
           {renderDataBinding()}
-          <div className="property-group">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <label>TEXT</label>
-              <div className="text-tools" style={{ display: 'flex', gap: 2 }}>
-                <button title="Bold (Ctrl+B)" onClick={() => wrapSelection('b')}><b>B</b></button>
-                <button title="Italic (Ctrl+I)" onClick={() => wrapSelection('i')}><i>I</i></button>
-                <button title="Underline (Ctrl+U)" onClick={() => wrapSelection('u')}><u>U</u></button>
-                <button title="Strike (Ctrl+S)" onClick={() => wrapSelection('s')}><s>S</s></button>
-                <button title="Superscript" onClick={() => wrapSelection('sup')}>x²</button>
-                <button title="Subscript" onClick={() => wrapSelection('sub')}>x₂</button>
-              </div>
+          <div className="property-group" style={{ flexDirection: 'column', gap: 4 }}>
+            <label style={{ color: 'var(--text-dim)', fontSize: 9, letterSpacing: 1 }}>TEXT — double-click on canvas to edit</label>
+            <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+              <button title="Bold" onClick={() => wrapSelection('b')} style={{ flex: 1 }}><b>B</b></button>
+              <button title="Italic" onClick={() => wrapSelection('i')} style={{ flex: 1 }}><i>I</i></button>
+              <button title="Underline" onClick={() => wrapSelection('u')} style={{ flex: 1 }}><u>U</u></button>
+              <button title="Strike" onClick={() => wrapSelection('s')} style={{ flex: 1 }}><s>S</s></button>
+              <button title="Superscript" onClick={() => wrapSelection('sup')} style={{ flex: 1 }}>x²</button>
+              <button title="Subscript" onClick={() => wrapSelection('sub')} style={{ flex: 1 }}>x₂</button>
             </div>
-            <textarea 
-              className="inspector-textarea"
-              value={localProps.text||''} 
-              onChange={e => updateAndCommit('text', e.target.value)} 
-              onKeyDown={handleKeyDown}
-              rows={4} 
-            />
           </div>
           {renderNumber('fontSize','FONT SIZE (px)','12')}
           <div className="property-group"><label>ALIGNMENT</label>
