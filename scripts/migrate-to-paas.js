@@ -113,17 +113,11 @@ function loadUrlMap() {
 function remapUrls(json, urlMap) {
   if (!urlMap.size) return json;
   let s = JSON.stringify(json);
-  for (const [, newUrl] of urlMap) {
-    // Derive the filename from the S3 url to match any localhost reference to it
-    const filename = newUrl.split('/').pop();
-    // Replace any localhost:PORT/uploads/filename reference
-    s = s.replace(
-      new RegExp(`http://localhost:\\d+/uploads/${filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'),
-      newUrl
-    );
-  }
-  // Also replace by stored key directly (/uploads/filename)
   for (const [localPath, newUrl] of urlMap) {
+    const escaped = localPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Replace full http://localhost:PORT/path references (most common — localDriver returns full URLs)
+    s = s.replace(new RegExp(`http://localhost:\\d+${escaped}`, 'g'), newUrl);
+    // Replace bare /path references (relative URLs)
     s = s.replaceAll(localPath, newUrl);
   }
   return JSON.parse(s);
