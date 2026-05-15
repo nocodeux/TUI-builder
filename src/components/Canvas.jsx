@@ -54,17 +54,8 @@ function DraggableComponent({
 }) {
   const currentTopRowId = topRowId || rowId;
   const ref = useRef(null);
-  const textareaRef = useRef(null);
   const [dropIndicator, setDropIndicator] = useState(null); // 'before' | 'after' | null
   const isEditingText = comp.type === 'Text' && editingTextId === comp.id;
-
-  useEffect(() => {
-    if (isEditingText && textareaRef.current) {
-      textareaRef.current.focus();
-      const len = textareaRef.current.value.length;
-      textareaRef.current.setSelectionRange(len, len);
-    }
-  }, [isEditingText]);
 
   const [{ isDragging }, drag] = useDrag(() => ({
     type: 'EXISTING_COMPONENT',
@@ -312,46 +303,6 @@ function DraggableComponent({
         }
       }}
     >
-      {/* Inline text editor overlay — shown on double-click for Text components */}
-      {isEditingText && (
-        <textarea
-          ref={textareaRef}
-          className="canvas-text-editor"
-          defaultValue={comp.props.text || ''}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 200,
-            background: 'transparent',
-            border: 'none',
-            outline: '1px dashed var(--accent)',
-            outlineOffset: '2px',
-            color: comp.props.textColor || 'var(--text)',
-            fontSize: `${comp.props.fontSize || 12}px`,
-            fontFamily: 'inherit',
-            textAlign: comp.props.alignment || 'left',
-            resize: 'none',
-            width: '100%',
-            height: '100%',
-            minHeight: 32,
-            padding: 0,
-            lineHeight: 1.4,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            boxSizing: 'border-box',
-          }}
-          onBlur={e => onCommitTextEdit && onCommitTextEdit(comp.id, e.target.value)}
-          onKeyDown={e => {
-            e.stopPropagation();
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              onCommitTextEdit && onCommitTextEdit(comp.id, null);
-            }
-          }}
-          onClick={e => e.stopPropagation()}
-          onMouseDown={e => e.stopPropagation()}
-        />
-      )}
       {/* Floating delete button for selected component */}
       {isSelected && (
         <button 
@@ -407,27 +358,27 @@ function DraggableComponent({
         />
       )}
 
-      <div style={{ visibility: isEditingText ? 'hidden' : 'visible', display: 'contents' }}>
-        <Component
-          {...comp.props}
-          id={comp.id}
-          selected={selectedIds && selectedIds.includes(comp.id)}
-          width={isWidthFill ? '100%' : (isWidthHug ? 'auto' : (comp.props.width != null && comp.props.width !== '' ? comp.props.width : 'auto'))}
-          height={isHeightFill ? '100%' : (isHeightHug ? 'auto' : (comp.props.height != null && comp.props.height !== '' ? comp.props.height : 'auto'))}
-          database={database}
-          onSaveRecord={onSaveRecord}
-          rows={comp.type === 'Table' && comp.props.dataSourceType === 'database' && comp.props.dataSource && database?.data?.[comp.props.dataSource]
-                ? database.data[comp.props.dataSource]
-                : comp.props.rows}
-          onAddChild={isContainer ? (type, extra) => onAddComponent(type, currentTopRowId, childCount, comp.id, extra) : undefined}
-          onMoveChild={isContainer ? item => onMoveComponent(item, currentTopRowId, childCount, null, comp.id) : undefined}
-          onNavigate={onNavigate}
-          onUpdate={(props) => onUpdateComponent(comp.id, props)}
-          tableName={comp.props.tableName}
-        >
-          {isContainer && renderContainerChildren()}
-        </Component>
-      </div>
+      <Component
+        {...comp.props}
+        id={comp.id}
+        selected={selectedIds && selectedIds.includes(comp.id)}
+        width={isWidthFill ? '100%' : (isWidthHug ? 'auto' : (comp.props.width != null && comp.props.width !== '' ? comp.props.width : 'auto'))}
+        height={isHeightFill ? '100%' : (isHeightHug ? 'auto' : (comp.props.height != null && comp.props.height !== '' ? comp.props.height : 'auto'))}
+        database={database}
+        onSaveRecord={onSaveRecord}
+        rows={comp.type === 'Table' && comp.props.dataSourceType === 'database' && comp.props.dataSource && database?.data?.[comp.props.dataSource]
+              ? database.data[comp.props.dataSource]
+              : comp.props.rows}
+        onAddChild={isContainer ? (type, extra) => onAddComponent(type, currentTopRowId, childCount, comp.id, extra) : undefined}
+        onMoveChild={isContainer ? item => onMoveComponent(item, currentTopRowId, childCount, null, comp.id) : undefined}
+        onNavigate={onNavigate}
+        onUpdate={(props) => onUpdateComponent(comp.id, props)}
+        tableName={comp.props.tableName}
+        isEditing={isEditingText}
+        onCommitText={(text) => onCommitTextEdit && onCommitTextEdit(comp.id, text)}
+      >
+        {isContainer && renderContainerChildren()}
+      </Component>
     </div>
   );
 }

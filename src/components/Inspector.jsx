@@ -2167,21 +2167,13 @@ function Inspector({
       case 'Text':
       case 'Label': {
         const wrapSelection = (tag) => {
-          // Target the inline canvas textarea if active, otherwise wrap entire text
-          const textarea = document.querySelector('.canvas-text-editor');
-          if (textarea) {
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            const val = textarea.value;
-            const newVal = `${val.substring(0, start)}[${tag}]${val.substring(start, end)}[/${tag}]${val.substring(end)}`;
-            // Use native setter so React's uncontrolled textarea picks up the change
-            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            nativeSetter.call(textarea, newVal);
-            textarea.dispatchEvent(new Event('input', { bubbles: true }));
-            setTimeout(() => {
-              textarea.focus();
-              textarea.setSelectionRange(start + tag.length + 2, end + tag.length + 2);
-            }, 0);
+          const editor = document.querySelector('.canvas-text-editor');
+          if (editor) {
+            // Buttons use onMouseDown preventDefault to keep focus on the editor.
+            // execCommand applies formatting to the current selection in the focused contentEditable.
+            const cmdMap = { b: 'bold', i: 'italic', u: 'underline', s: 'strikeThrough', sup: 'superscript', sub: 'subscript' };
+            const cmd = cmdMap[tag];
+            if (cmd) document.execCommand(cmd, false, null);
           } else {
             // Fallback: wrap entire text when not in inline edit mode
             const val = localProps.text || '';
@@ -2194,12 +2186,12 @@ function Inspector({
           <div className="property-group" style={{ flexDirection: 'column', gap: 4 }}>
             <label style={{ color: 'var(--text-dim)', fontSize: 9, letterSpacing: 1 }}>TEXT — double-click on canvas to edit</label>
             <div className="text-tools" style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-              <button title="Bold (Ctrl+B)" onClick={() => wrapSelection('b')}><b>B</b></button>
-              <button title="Italic (Ctrl+I)" onClick={() => wrapSelection('i')}><i>I</i></button>
-              <button title="Underline (Ctrl+U)" onClick={() => wrapSelection('u')}><u>U</u></button>
-              <button title="Strike (Ctrl+S)" onClick={() => wrapSelection('s')}><s>S</s></button>
-              <button title="Superscript" onClick={() => wrapSelection('sup')}>x²</button>
-              <button title="Subscript" onClick={() => wrapSelection('sub')}>x₂</button>
+              <button title="Bold" onMouseDown={e => e.preventDefault()} onClick={() => wrapSelection('b')}><b>B</b></button>
+              <button title="Italic" onMouseDown={e => e.preventDefault()} onClick={() => wrapSelection('i')}><i>I</i></button>
+              <button title="Underline" onMouseDown={e => e.preventDefault()} onClick={() => wrapSelection('u')}><u>U</u></button>
+              <button title="Strike" onMouseDown={e => e.preventDefault()} onClick={() => wrapSelection('s')}><s>S</s></button>
+              <button title="Superscript" onMouseDown={e => e.preventDefault()} onClick={() => wrapSelection('sup')}>x²</button>
+              <button title="Subscript" onMouseDown={e => e.preventDefault()} onClick={() => wrapSelection('sub')}>x₂</button>
             </div>
           </div>
           {renderNumber('fontSize','FONT SIZE (px)','12')}
