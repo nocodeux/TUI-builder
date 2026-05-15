@@ -407,29 +407,27 @@ function DraggableComponent({
         />
       )}
 
-      <Component
-        {...comp.props}
-        id={comp.id}
-        selected={selectedIds && selectedIds.includes(comp.id)}
-        // Pass override sizing to the component
-        width={isWidthFill ? '100%' : (isWidthHug ? 'auto' : (comp.props.width != null && comp.props.width !== '' ? comp.props.width : 'auto'))}
-        height={isHeightFill ? '100%' : (isHeightHug ? 'auto' : (comp.props.height != null && comp.props.height !== '' ? comp.props.height : 'auto'))}
-        database={database}
-        onSaveRecord={onSaveRecord}
-        // If Table and bound to database, override rows
-        rows={comp.type === 'Table' && comp.props.dataSourceType === 'database' && comp.props.dataSource && database?.data?.[comp.props.dataSource] 
-              ? database.data[comp.props.dataSource] 
-              : comp.props.rows}
-        onAddChild={isContainer ? (type, extra) => onAddComponent(type, currentTopRowId, childCount, comp.id, extra) : undefined}
-        onMoveChild={isContainer ? item => onMoveComponent(item, currentTopRowId, childCount, null, comp.id) : undefined}
-        onNavigate={onNavigate}
-        onUpdate={(props) => onUpdateComponent(comp.id, props)}
-        onSaveRecord={onSaveRecord}
-        database={database}
-        tableName={comp.props.tableName}
-      >
-        {isContainer && renderContainerChildren()}
-      </Component>
+      {!isEditingText && (
+        <Component
+          {...comp.props}
+          id={comp.id}
+          selected={selectedIds && selectedIds.includes(comp.id)}
+          width={isWidthFill ? '100%' : (isWidthHug ? 'auto' : (comp.props.width != null && comp.props.width !== '' ? comp.props.width : 'auto'))}
+          height={isHeightFill ? '100%' : (isHeightHug ? 'auto' : (comp.props.height != null && comp.props.height !== '' ? comp.props.height : 'auto'))}
+          database={database}
+          onSaveRecord={onSaveRecord}
+          rows={comp.type === 'Table' && comp.props.dataSourceType === 'database' && comp.props.dataSource && database?.data?.[comp.props.dataSource]
+                ? database.data[comp.props.dataSource]
+                : comp.props.rows}
+          onAddChild={isContainer ? (type, extra) => onAddComponent(type, currentTopRowId, childCount, comp.id, extra) : undefined}
+          onMoveChild={isContainer ? item => onMoveComponent(item, currentTopRowId, childCount, null, comp.id) : undefined}
+          onNavigate={onNavigate}
+          onUpdate={(props) => onUpdateComponent(comp.id, props)}
+          tableName={comp.props.tableName}
+        >
+          {isContainer && renderContainerChildren()}
+        </Component>
+      )}
     </div>
   );
 }
