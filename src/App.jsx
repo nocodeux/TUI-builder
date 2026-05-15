@@ -50,7 +50,7 @@ function App() {
   const [selectedIds, setSelectedIds] = useState([]); // Array of IDs
   const [lastSelectedId, setLastSelectedId] = useState(null); // For shift-select ranges if needed later
   const [viewMode, setViewMode] = useState('desktop');
-  const [theme, setTheme] = useState(() => localStorage.getItem('nanostudio_theme') || 'theme-nano');
+  const [theme, setTheme] = useState(() => localStorage.getItem('nanostudio_theme') || 'theme-retro');
   const [showUserJourney, setShowUserJourney] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showDatabase, setShowDatabase] = useState(false);
@@ -1749,7 +1749,8 @@ function App() {
     document.title = builderName;
   }, [builderName]);
 
-  // Load settings from server (builderName is global; externalApis are per-user)
+  // Load settings from server on login.
+  // builderName is global (admin-set); theme + externalApis are per-user.
   useEffect(() => {
     if (!currentUser) return;
     apiFetch('/api/settings')
@@ -1757,20 +1758,23 @@ function App() {
       .then(data => {
         if (data.builderName) setBuilderName(data.builderName);
         if (data.externalApis) setExternalApis(data.externalApis);
+        // Apply the user's saved theme preference (falls back to current state if absent)
+        if (data.theme) setTheme(data.theme);
       })
       .catch(err => console.error('Error loading settings:', err));
   }, [currentUser]);
 
-  // Auto-save settings — builderName write is gated to admin on the server
+  // Auto-save settings — builderName write is gated to admin on the server.
+  // theme is saved as a per-user preference so each user keeps their own choice.
   useEffect(() => {
     if (!currentUser) return;
     if (isInitialLoading.current) return;
     apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ builderName, externalApis })
+      body: JSON.stringify({ builderName, externalApis, theme })
     }).catch(err => console.error('Error saving settings:', err));
-  }, [builderName, externalApis, currentUser]);
+  }, [builderName, externalApis, theme, currentUser]);
 
   useEffect(() => {
     if (!currentProject.id || currentProject.id === 'default') {
@@ -1794,7 +1798,7 @@ function App() {
           setScreens(data.screens);
           setCurrentScreenId(data.currentScreenId || data.screens[0].id);
         }
-        if (data.theme) setTheme(data.theme);
+        // theme is a per-user preference — don't override it from project data
         if (data.viewMode) setViewMode(data.viewMode);
         if (data.database) setDatabase(data.database);
         if (data.activeWindow) setActiveWindow(data.activeWindow);
