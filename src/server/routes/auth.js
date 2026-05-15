@@ -242,6 +242,12 @@ authRouter.post('/login', authLimiter, async (req, res) => {
       const emailOk = safeCompare(email, process.env.ADMIN_EMAIL);
       const passOk  = safeCompare(password, process.env.ADMIN_PASSWORD);
       if (emailOk && passOk) {
+        // Upsert into DB so admin gets a real userId (needed for publishing, assets, etc.)
+        const adminUser = await upsertUser({ email, displayName: 'Admin', role: 'admin' });
+        if (adminUser) {
+          await seedDemosForUser(adminUser.id);
+          return res.json({ token: userToken(adminUser), ...userPublic(adminUser) });
+        }
         return res.json({ token: sign({ email, role: 'admin' }), email, role: 'admin' });
       }
     }
