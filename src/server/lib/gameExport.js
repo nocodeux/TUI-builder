@@ -1,5 +1,37 @@
 // Server-side HTML generation for published pages and games.
 
+// Asset preloader — injects a script that warms the browser cache before the
+// runtime starts. Images are loaded via new Image(); audio via new Audio().
+// Returns a self-contained <script> block (no external deps).
+function assetPreloaderScript({ playBtnId = null } = {}) {
+  // language=JS
+  return `<script>(function(){
+  var a=window.__TUIFY_ASSETS__||{};
+  var imgs=[].concat(
+    (a.sprites||[]).map(function(x){return x.url;}),
+    (a.tilesets||[]).map(function(x){return x.url;}),
+    (a.backgrounds||[]).map(function(x){return x.url;})
+  ).filter(Boolean);
+  var snds=(a.sounds||[]).map(function(x){return x.url;}).filter(Boolean);
+  var total=imgs.length+snds.length;
+  if(!total)return;
+  var done=0;
+  var btn=${playBtnId ? `document.getElementById('${playBtnId}')` : 'null'};
+  var loader=${playBtnId ? 'null' : "document.getElementById('_tfy-loader')"};
+  var loaderBar=${playBtnId ? 'null' : "document.getElementById('_tfy-loader-bar')"};
+  function tick(){
+    done++;
+    var pct=Math.min(100,Math.round(done/total*100));
+    if(btn&&done<total){btn.textContent='Loading '+pct+'%';btn.disabled=true;btn.style.opacity='0.6';}
+    else if(btn&&done>=total){btn.innerHTML='&#9654; Play';btn.disabled=false;btn.style.opacity='1';}
+    if(loaderBar){loaderBar.style.width=pct+'%';}
+    if(loader&&done>=total){loader.style.opacity='0';setTimeout(function(){loader.style.display='none';},400);}
+  }
+  imgs.forEach(function(u){var i=new Image();i.onload=i.onerror=tick;i.src=u;});
+  snds.forEach(function(u){var au=new Audio();au.oncanplaythrough=au.onerror=tick;au.preload='auto';au.src=u;});
+})();</script>`;
+}
+
 function esc(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -61,16 +93,32 @@ export function generateGameHtml({ worlds, assets, title, description, origin = 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
     #game-root { width: 100%; height: 100%; }
+    #_tfy-loader {
+      position: fixed; inset: 0; z-index: 9999;
+      background: #0a0a0a; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+      font-family: monospace; color: #33ff33;
+      transition: opacity 0.4s;
+    }
+    #_tfy-loader-track {
+      width: 200px; height: 2px; background: #1a1a1a; border: 1px solid #33ff33;
+    }
+    #_tfy-loader-bar { height: 100%; width: 0%; background: #33ff33; transition: width 0.2s; }
     ${BADGE_CSS}
   </style>
 </head>
 <body>
+  <div id="_tfy-loader">
+    <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase">Loading</div>
+    <div id="_tfy-loader-track"><div id="_tfy-loader-bar"></div></div>
+  </div>
   <div id="game-root"></div>
   ${BADGE_HTML(origin)}
   <script>
     window.__TUIFY_WORLDS__ = ${worldsJson};
     window.__TUIFY_ASSETS__ = ${assetsJson};
   </script>
+  ${assetPreloaderScript()}
   <script src="${origin}/runtime/tuify-game.js"></script>
 </body>
 </html>`;
@@ -124,6 +172,7 @@ export function generateCombinedHtml({ pageHtml, worlds, assets, title, descript
 window.__TUIFY_WORLDS__ = ${worldsJson};
 window.__TUIFY_ASSETS__ = ${assetsJson};
 </script>
+${assetPreloaderScript({ playBtnId: '_tfy-play' })}
 <script src="${origin}/runtime/tuify-game.js"></script>`;
 
   return pageHtml.replace(/<\/body>/i, `${injection}\n</body>`);

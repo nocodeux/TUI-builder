@@ -2193,13 +2193,13 @@ function Inspector({
           {renderDataBinding()}
           <div className="property-group" style={{ flexDirection: 'column', gap: 4 }}>
             <label style={{ color: 'var(--text-dim)', fontSize: 9, letterSpacing: 1 }}>TEXT — double-click on canvas to edit</label>
-            <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-              <button title="Bold" onClick={() => wrapSelection('b')} style={{ flex: 1 }}><b>B</b></button>
-              <button title="Italic" onClick={() => wrapSelection('i')} style={{ flex: 1 }}><i>I</i></button>
-              <button title="Underline" onClick={() => wrapSelection('u')} style={{ flex: 1 }}><u>U</u></button>
-              <button title="Strike" onClick={() => wrapSelection('s')} style={{ flex: 1 }}><s>S</s></button>
-              <button title="Superscript" onClick={() => wrapSelection('sup')} style={{ flex: 1 }}>x²</button>
-              <button title="Subscript" onClick={() => wrapSelection('sub')} style={{ flex: 1 }}>x₂</button>
+            <div className="text-tools" style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+              <button title="Bold (Ctrl+B)" onClick={() => wrapSelection('b')}><b>B</b></button>
+              <button title="Italic (Ctrl+I)" onClick={() => wrapSelection('i')}><i>I</i></button>
+              <button title="Underline (Ctrl+U)" onClick={() => wrapSelection('u')}><u>U</u></button>
+              <button title="Strike (Ctrl+S)" onClick={() => wrapSelection('s')}><s>S</s></button>
+              <button title="Superscript" onClick={() => wrapSelection('sup')}>x²</button>
+              <button title="Subscript" onClick={() => wrapSelection('sub')}>x₂</button>
             </div>
           </div>
           {renderNumber('fontSize','FONT SIZE (px)','12')}
