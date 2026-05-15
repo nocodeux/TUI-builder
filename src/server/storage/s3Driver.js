@@ -30,6 +30,7 @@ export const s3Driver = {
       Key: key,
       Body: buffer,
       ContentType: mimeType,
+      ACL: 'public-read',
     }));
     // Public URL priority:
     //  1. CDN_BASE_URL  — PaaS injects this as the full public base including bucket
