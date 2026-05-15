@@ -13,7 +13,8 @@
     "start": "NODE_ENV=production node src/server/index.js",
     "preview": "vite preview",
     "check:arch": "node scripts/check-architecture.js",
-    "migrate:paas": "node scripts/migrate-to-paas.js"
+    "migrate:paas": "node scripts/migrate-to-paas.js",
+    "fix:owners": "node scripts/fix-orphan-projects.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1046.0",
