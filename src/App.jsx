@@ -2702,6 +2702,19 @@ ${(() => {
     }
   };
 
+  const toggleDemo = async (proj) => {
+    try {
+      await apiFetch(`/api/projects/${proj.id}/demo`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isDemo: !proj.isDemo }),
+      });
+      fetchProjects();
+    } catch (err) {
+      console.error('toggleDemo error:', err);
+    }
+  };
+
   const selectedElement = findSelected();
   const isRowSelected = selectedElement && (activeScreen?.rows || []).some(r => selectedIds.includes(r.id));
   // Find the first selected ID that maps to an entity in the active level.
@@ -3141,7 +3154,7 @@ ${(() => {
                   <div key={proj.id} className="project-item">
                     <div className="project-name-cell">
                       {editingProjectId === proj.id ? (
-                        <input 
+                        <input
                           autoFocus
                           type="text"
                           value={editingProjectName}
@@ -3154,12 +3167,30 @@ ${(() => {
                           style={{ background: 'var(--input-bg)', border: '1px solid var(--accent)', color: 'var(--accent)', padding: '2px 4px', width: '100%', fontFamily: 'monospace', fontSize: 13 }}
                         />
                       ) : (
-                        <div style={{ color: 'var(--text)', fontWeight: 'bold', cursor: 'pointer' }}
-                             onClick={() => { setEditingProjectId(proj.id); setEditingProjectName(proj.name); }}>{proj.name}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <div style={{ color: 'var(--text)', fontWeight: 'bold', cursor: 'pointer' }}
+                               onClick={() => { setEditingProjectId(proj.id); setEditingProjectName(proj.name); }}>{proj.name}</div>
+                          {proj.isDemo && (
+                            <span style={{ fontSize: 8, padding: '1px 4px', background: 'rgba(0,170,255,0.15)', border: '1px solid rgba(0,170,255,0.4)', color: '#00aaff', fontFamily: 'monospace', letterSpacing: 1 }}>DEMO</span>
+                          )}
+                          {proj.clonedFrom && !proj.isDemo && (
+                            <span style={{ fontSize: 8, padding: '1px 4px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-dim)', fontFamily: 'monospace', letterSpacing: 1 }}>from demo</span>
+                          )}
+                        </div>
                       )}
                       <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>{proj.lastSaved}</div>
                     </div>
-                    <div style={{ display: 'flex', gap: 4 }}>
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      {currentUser?.role === 'admin' && (
+                        <button
+                          className="small-btn"
+                          title={proj.isDemo ? 'Remove demo flag' : 'Set as demo project'}
+                          onClick={() => toggleDemo(proj)}
+                          style={{ fontSize: 9, padding: '2px 5px', opacity: proj.isDemo ? 1 : 0.5, color: proj.isDemo ? '#00aaff' : 'var(--text-dim)', borderColor: proj.isDemo ? '#00aaff' : 'var(--border)' }}
+                        >
+                          {proj.isDemo ? '★ demo' : '☆ demo'}
+                        </button>
+                      )}
                       <button className="small-btn" onClick={() => loadProject(proj.id)}>Load</button>
                       <button className="small-btn danger" onClick={() => deleteProject(proj.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, padding: 0 }}>
                         <TrashIcon />

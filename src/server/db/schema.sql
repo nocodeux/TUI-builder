@@ -60,6 +60,14 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_id TEXT REFERENCES users(id);
 CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
 
+-- Demo projects: admin flags a project as a demo; new users get a copy on first login
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_demo     BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS demo_order  INT     NOT NULL DEFAULT 0;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS cloned_from TEXT;
+
+-- Track whether demo projects have already been seeded into a user's account
+ALTER TABLE users ADD COLUMN IF NOT EXISTS demos_seeded BOOLEAN NOT NULL DEFAULT false;
+
 -- owner_id on assets
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS owner_id TEXT REFERENCES users(id);
 CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_id);

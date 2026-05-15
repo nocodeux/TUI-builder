@@ -1,7 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { query, isAvailable } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -76,6 +76,26 @@ function userPublic(user) {
   return { userId: user.id, email: user.email, role: user.role, displayName: user.display_name, avatarUrl: user.avatar_url, xHandle: user.x_handle };
 }
 
+async function seedDemosForUser(userId) {
+  try {
+    const { rows: u } = await query('SELECT demos_seeded FROM users WHERE id = $1', [userId]);
+    if (!u[0] || u[0].demos_seeded) return;
+    const { rows: demos } = await query(
+      'SELECT id, name, data, assets_json FROM projects WHERE is_demo = true ORDER BY demo_order ASC'
+    );
+    for (const demo of demos) {
+      await query(
+        `INSERT INTO projects (id, name, data, assets_json, owner_id, cloned_from, last_saved)
+         VALUES ($1, $2, $3, $4, $5, $6, now())`,
+        [randomUUID(), demo.name, JSON.stringify(demo.data), JSON.stringify(demo.assets_json), userId, demo.id]
+      );
+    }
+    await query('UPDATE users SET demos_seeded = true WHERE id = $1', [userId]);
+  } catch (err) {
+    console.error('[auth] seedDemosForUser error:', err.message);
+  }
+}
+
 // ─── Register ────────────────────────────────────────────────────────────────
 
 authRouter.post('/register', async (req, res) => {
@@ -95,6 +115,7 @@ authRouter.post('/register', async (req, res) => {
     [email, password_hash, displayName || email.split('@')[0]]
   );
   const user = rows[0];
+  await seedDemosForUser(user.id);
   res.json({ token: userToken(user), ...userPublic(user) });
 });
 
@@ -110,6 +131,7 @@ authRouter.post('/login', async (req, res) => {
     const user = rows[0];
     if (user?.password_hash && await bcrypt.compare(password, user.password_hash)) {
       await query('UPDATE users SET last_login = now() WHERE id = $1', [user.id]);
+      await seedDemosForUser(user.id);
       return res.json({ token: userToken(user), ...userPublic(user) });
     }
     // If user exists but no password_hash, they registered via OAuth
@@ -209,6 +231,7 @@ authRouter.get('/x/callback', async (req, res) => {
     const { data: xUser } = await userRes.json();
 
     const user = await upsertUser({ email: `${xUser.username}@x.tuify`, displayName: xUser.name, avatarUrl: xUser.profile_image_url, xId: xUser.id, xHandle: xUser.username });
+    await seedDemosForUser(user.id);
     res.redirect(`${frontendUrl()}/#token=${userToken(user)}`);
   } catch (err) {
     console.error('[auth] X callback error:', err.message);
@@ -255,6 +278,7 @@ authRouter.get('/google/callback', async (req, res) => {
     const gUser = await infoRes.json();
 
     const user = await upsertUser({ email: gUser.email, displayName: gUser.name, avatarUrl: gUser.picture, googleId: gUser.sub });
+    await seedDemosForUser(user.id);
     res.redirect(`${frontendUrl()}/#token=${userToken(user)}`);
   } catch (err) {
     console.error('[auth] Google callback error:', err.message);

@@ -24,8 +24,15 @@ projectsRouter.get('/', async (req, res) => {
     if (await useDb()) {
       const owner = ownerId(req);
       const { rows } = owner
-        ? await query(`SELECT id, name, last_saved AS "lastSaved" FROM projects WHERE owner_id = $1 ORDER BY last_saved DESC`, [owner])
-        : await query(`SELECT id, name, last_saved AS "lastSaved" FROM projects ORDER BY last_saved DESC`);
+        ? await query(
+            `SELECT id, name, last_saved AS "lastSaved", is_demo AS "isDemo", demo_order AS "demoOrder", cloned_from AS "clonedFrom"
+             FROM projects WHERE owner_id = $1 ORDER BY last_saved DESC`,
+            [owner]
+          )
+        : await query(
+            `SELECT id, name, last_saved AS "lastSaved", is_demo AS "isDemo", demo_order AS "demoOrder", cloned_from AS "clonedFrom"
+             FROM projects ORDER BY last_saved DESC`
+          );
       return res.json(rows);
     }
     ensureDir();
@@ -149,6 +156,26 @@ projectsRouter.delete('/:id/assets', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('[projects] DELETE /:id/assets error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Admin: toggle demo flag ───────────────────────────────────────────────────
+// PATCH /api/projects/:id/demo  { isDemo: bool, demoOrder?: number }
+projectsRouter.patch('/:id/demo', async (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  if (!await useDb()) return res.status(503).json({ error: 'Database required' });
+  const { id } = req.params;
+  const { isDemo, demoOrder } = req.body || {};
+  try {
+    const { rowCount } = await query(
+      `UPDATE projects SET is_demo = $1, demo_order = COALESCE($2, demo_order) WHERE id = $3`,
+      [Boolean(isDemo), demoOrder ?? null, id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Project not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[projects] PATCH /:id/demo error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
