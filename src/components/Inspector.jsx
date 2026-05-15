@@ -14,6 +14,7 @@ import { resolveTilesetView, cellOrigin, listTileSources } from '../lib/tilesetV
 import { NumericInput } from '../lib/inputs';
 import { loadMaskedImage } from '../lib/imageMask';
 import { uploadAsset } from '../lib/assetUpload';
+import Selector from './Componentes/Selector';
 
 const mkId = () => Math.random().toString(36).substring(2, 9);
 
@@ -448,10 +449,7 @@ function AttackSlot({ attack, allAttacks, animSlots, expanded, onToggle, onChang
           </div>
           <div className="property-group" style={{ margin: 0 }}>
             <label title="Animation slot to play during this attack.">ANIM</label>
-            <select value={attack.anim || ''} onChange={e => onChange({ anim: e.target.value || null })}>
-              <option value="">— none —</option>
-              {animSlots.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
-            </select>
+            <Selector value={attack.anim || ''} onChange={v => onChange({ anim: v || null })} options={[{value:'',label:'— none —'}, ...animSlots.map(a => ({value:a.name,label:a.name}))]} width="100%" />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
             <div className="property-group" style={{ margin: 0 }}>
@@ -470,12 +468,7 @@ function AttackSlot({ attack, allAttacks, animSlots, expanded, onToggle, onChang
           </div>
           <div className="property-group" style={{ margin: 0 }}>
             <label title="Press attack again during the combo window to chain into this next attack.">NEXT IN COMBO</label>
-            <select value={attack.comboNext || ''} onChange={e => onChange({ comboNext: e.target.value || null })}>
-              <option value="">— end of combo —</option>
-              {allAttacks.filter(a => a.id !== attack.id).map(a => (
-                <option key={a.id} value={a.id}>{a.name || '(unnamed)'}</option>
-              ))}
-            </select>
+            <Selector value={attack.comboNext || ''} onChange={v => onChange({ comboNext: v || null })} options={[{value:'',label:'— end of combo —'}, ...allAttacks.filter(a => a.id !== attack.id).map(a => ({value:a.id,label:a.name || '(unnamed)'}))]} width="100%" />
           </div>
           {attack.comboNext && (
             <div className="property-group" style={{ margin: 0 }}>
@@ -510,10 +503,7 @@ function IdleSlot({ idle, animSlots, expanded, onToggle, onChange, onRemove }) {
           </div>
           <div className="property-group" style={{ margin: 0 }}>
             <label title="Animation slot to play for this idle variation.">ANIM</label>
-            <select value={idle.anim || ''} onChange={e => onChange({ anim: e.target.value || null })}>
-              <option value="">— none —</option>
-              {animSlots.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
-            </select>
+            <Selector value={idle.anim || ''} onChange={v => onChange({ anim: v || null })} options={[{value:'',label:'— none —'}, ...animSlots.map(a => ({value:a.name,label:a.name}))]} width="100%" />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
             <div className="property-group" style={{ margin: 0 }}>
@@ -794,28 +784,12 @@ function Inspector({
         </div>
         <div className="property-group">
           <label>ROLE</label>
-          <select value={ent.role || 'prop'}
-            onChange={e => onUpdateEntity(ent.id, { role: e.target.value })}>
-            <option value="playerMain">Player (main)</option>
-            <option value="player2">Player 2</option>
-            <option value="player3">Player 3</option>
-            <option value="player4">Player 4</option>
-            <option value="enemy">Enemy</option>
-            <option value="npc">NPC</option>
-            <option value="interactive">Interactive</option>
-            <option value="prop">Prop</option>
-          </select>
+          <Selector value={ent.role || 'prop'} onChange={v => onUpdateEntity(ent.id, { role: v })} options={[{value:'playerMain',label:'Player (main)'},{value:'player2',label:'Player 2'},{value:'player3',label:'Player 3'},{value:'player4',label:'Player 4'},{value:'enemy',label:'Enemy'},{value:'npc',label:'NPC'},{value:'interactive',label:'Interactive'},{value:'prop',label:'Prop'}]} width="100%" />
         </div>
         {(ent.role === 'enemy') && (
           <div className="property-group">
             <label>ENEMY TYPE</label>
-            <select value={ent.enemyType || 'regular'}
-              onChange={e => onUpdateEntity(ent.id, { enemyType: e.target.value })}>
-              <option value="regular">Regular</option>
-              <option value="elite">Elite</option>
-              <option value="miniboss">Mini-boss</option>
-              <option value="boss">Boss</option>
-            </select>
+            <Selector value={ent.enemyType || 'regular'} onChange={v => onUpdateEntity(ent.id, { enemyType: v })} options={[{value:'regular',label:'Regular'},{value:'elite',label:'Elite'},{value:'miniboss',label:'Mini-boss'},{value:'boss',label:'Boss'}]} width="100%" />
           </div>
         )}
 
@@ -917,26 +891,11 @@ function Inspector({
                   </div>
                   <div className="property-group" style={{ margin: 0 }}>
                     <label>SHEET</label>
-                    <select
-                      value={slot.spriteSheetId || ''}
-                      onChange={e => updateSlot({ spriteSheetId: e.target.value || null, animName: null })}
-                      style={{ fontSize: 10 }}
-                    >
-                      <option value="">— none —</option>
-                      {sprites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                    <Selector value={slot.spriteSheetId || ''} onChange={v => updateSlot({ spriteSheetId: v || null, animName: null })} options={[{value:'',label:'— none —'}, ...sprites.map(s => ({value:s.id,label:s.name}))]} width="100%" />
                   </div>
                   <div className="property-group" style={{ margin: 0 }}>
                     <label>ANIMATION</label>
-                    <select
-                      value={slot.animName || ''}
-                      disabled={!slotSheet}
-                      onChange={e => updateSlot({ animName: e.target.value || null })}
-                      style={{ fontSize: 10 }}
-                    >
-                      <option value="">— none —</option>
-                      {slotAnims.map(a => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
-                    </select>
+                    <Selector value={slot.animName || ''} onChange={v => updateSlot({ animName: v || null })} options={[{value:'',label:'— none —'}, ...slotAnims.map(a => ({value:a.name,label:a.name}))]} width="100%" containerStyle={!slotSheet ? {opacity:0.5,pointerEvents:'none'} : undefined} />
                   </div>
                   <div className="property-group" style={{ margin: 0 }}>
                     <label title="Which direction the sprite faces in the source sheet">FACING IN SHEET</label>
@@ -983,19 +942,11 @@ function Inspector({
         })}
         <div className="property-group" style={{ marginTop: 6 }}>
           <label title="The animation played when the entity is at rest — no movement or attack input. If you have multiple idle variations, set the primary one here.">DEFAULT ANIM (idle)</label>
-          <select value={ent.defaultAnimation || ''}
-            onChange={e => onUpdateEntity(ent.id, { defaultAnimation: e.target.value || null })}>
-            <option value="">— none —</option>
-            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
-          </select>
+          <Selector value={ent.defaultAnimation || ''} onChange={v => onUpdateEntity(ent.id, { defaultAnimation: v || null })} options={[{value:'',label:'— none —'}, ...(ent.animations || []).map(a => ({value:a.name,label:a.name}))]} width="100%" />
         </div>
         <div className="property-group">
           <label>FACING</label>
-          <select value={ent.facing || 'right'}
-            onChange={e => onUpdateEntity(ent.id, { facing: e.target.value })}>
-            <option value="right">right</option>
-            <option value="left">left</option>
-          </select>
+          <Selector value={ent.facing || 'right'} onChange={v => onUpdateEntity(ent.id, { facing: v })} options={[{value:'right',label:'right'},{value:'left',label:'left'}]} width="100%" />
         </div>
 
         <div className="property-divider" />
@@ -1141,19 +1092,11 @@ function Inspector({
         </div>
         <div className="property-group">
           <label title="Animation name to play while airborne (Space jump, platformer only). Leave blank to auto-detect (jump/leap/air/fall).">JUMP ANIM</label>
-          <select value={ent.behavior?.jumpAnim || ''}
-            onChange={e => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), jumpAnim: e.target.value || null } })}>
-            <option value="">— auto-detect —</option>
-            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
-          </select>
+          <Selector value={ent.behavior?.jumpAnim || ''} onChange={v => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), jumpAnim: v || null } })} options={[{value:'',label:'— auto-detect —'}, ...(ent.animations || []).map(a => ({value:a.name,label:a.name}))]} width="100%" />
         </div>
         <div className="property-group">
           <label title="Animation name to play when Shift + move. Leave blank to auto-detect (run).">RUN ANIM</label>
-          <select value={ent.behavior?.runAnim || ''}
-            onChange={e => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), runAnim: e.target.value || null } })}>
-            <option value="">— auto-detect —</option>
-            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
-          </select>
+          <Selector value={ent.behavior?.runAnim || ''} onChange={v => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), runAnim: v || null } })} options={[{value:'',label:'— auto-detect —'}, ...(ent.animations || []).map(a => ({value:a.name,label:a.name}))]} width="100%" />
         </div>
 
         <div className="property-divider" style={{ margin: '8px 0 6px' }} />
@@ -1224,19 +1167,11 @@ function Inspector({
         </div>
         <div className="property-group">
           <label title="Played on any hit. Auto-detect: hurt / pain / flinch / damage.">HIT ANIM (normal)</label>
-          <select value={ent.behavior?.hitAnim || ''}
-            onChange={e => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), hitAnim: e.target.value || null } })}>
-            <option value="">— auto-detect —</option>
-            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
-          </select>
+          <Selector value={ent.behavior?.hitAnim || ''} onChange={v => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), hitAnim: v || null } })} options={[{value:'',label:'— auto-detect —'}, ...(ent.animations || []).map(a => ({value:a.name,label:a.name}))]} width="100%" />
         </div>
         <div className="property-group">
           <label title="Played when damage ≥ HIT THRESHOLD. Auto-detect: heavy / stagger / knockback / ko.">HIT ANIM (heavy)</label>
-          <select value={ent.behavior?.heavyHitAnim || ''}
-            onChange={e => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), heavyHitAnim: e.target.value || null } })}>
-            <option value="">— none —</option>
-            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
-          </select>
+          <Selector value={ent.behavior?.heavyHitAnim || ''} onChange={v => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), heavyHitAnim: v || null } })} options={[{value:'',label:'— none —'}, ...(ent.animations || []).map(a => ({value:a.name,label:a.name}))]} width="100%" />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
           <div className="property-group" style={{ margin: 0 }}>
@@ -1255,11 +1190,7 @@ function Inspector({
         <div className="al-section-title" style={{ marginBottom: 4 }}>DEATH</div>
         <div className="property-group">
           <label title="Animation to play when HP reaches 0. Auto-detect: death / die / dead.">DEATH ANIM</label>
-          <select value={ent.behavior?.deathAnim || ''}
-            onChange={e => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), deathAnim: e.target.value || null } })}>
-            <option value="">— auto-detect —</option>
-            {(ent.animations || []).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
-          </select>
+          <Selector value={ent.behavior?.deathAnim || ''} onChange={v => onUpdateEntity(ent.id, { behavior: { ...(ent.behavior || {}), deathAnim: v || null } })} options={[{value:'',label:'— auto-detect —'}, ...(ent.animations || []).map(a => ({value:a.name,label:a.name}))]} width="100%" />
         </div>
         <div className="property-group">
           <label title="Milliseconds after the death animation starts before the entity is removed from the scene. Leave empty to keep the corpse visible indefinitely.">VANISH (ms)</label>
@@ -1349,22 +1280,11 @@ function Inspector({
         </div>
         <div className="property-group">
           <label>TYPE</label>
-          <select value={lvl.levelType || 'hud-only'}
-            onChange={e => onUpdateLevel(lvl.id, { levelType: e.target.value })}>
-            <option value="hud-only">HUD only (intro / menu / game over)</option>
-            <option value="game">Game only (no HUD overlay)</option>
-            <option value="game+hud">Game + HUD overlay</option>
-          </select>
+          <Selector value={lvl.levelType || 'hud-only'} onChange={v => onUpdateLevel(lvl.id, { levelType: v })} options={[{value:'hud-only',label:'HUD only (intro / menu / game over)'},{value:'game',label:'Game only (no HUD overlay)'},{value:'game+hud',label:'Game + HUD overlay'}]} width="100%" />
         </div>
         <div className="property-group">
           <label>VIEWPORT</label>
-          <select value={lvl.viewport || 'topdown'}
-            onChange={e => onUpdateLevel(lvl.id, { viewport: e.target.value })}>
-            <option value="topdown">Top-down</option>
-            <option value="platformer">Platformer</option>
-            <option value="isometric">Isometric</option>
-            <option value="board">Board</option>
-          </select>
+          <Selector value={lvl.viewport || 'topdown'} onChange={v => onUpdateLevel(lvl.id, { viewport: v })} options={[{value:'topdown',label:'Top-down'},{value:'platformer',label:'Platformer'},{value:'isometric',label:'Isometric'},{value:'board',label:'Board'}]} width="100%" />
         </div>
         {(() => {
           const presets = {
@@ -1426,15 +1346,7 @@ function Inspector({
           return (
             <>
               <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                <select
-                  value=""
-                  onChange={e => { if (e.target.value) onAddBackgroundLayer(e.target.value); }}
-                  style={{ flex: 1 }}
-                  disabled={available.length === 0}
-                >
-                  <option value="">{available.length ? '+ Add background layer…' : 'No backgrounds (import in Sprites→Backgrounds)'}</option>
-                  {available.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
+                <Selector value="" onChange={v => { if (v) onAddBackgroundLayer(v); }} options={[{value:'',label:available.length ? '+ Add background layer…' : 'No backgrounds (import in Sprites→Backgrounds)'}, ...available.map(a => ({value:a.id,label:a.name}))]} containerStyle={{ flex: 1, opacity: available.length === 0 ? 0.5 : 1, pointerEvents: available.length === 0 ? 'none' : 'auto' }} />
               </div>
               {bgs.length === 0 && (
                 <div style={{ fontSize: 10, color: 'var(--text-dim)', padding: 8 }}>
@@ -1544,31 +1456,17 @@ function Inspector({
 
         <div className="property-group">
           <label>TILESET</label>
-          <select
-            value={tm.tilesetAssetId || ''}
-            onChange={e => patchTileMap({ tilesetAssetId: e.target.value || null })}
-          >
-            <option value="">— none —</option>
-            {(() => {
-              const sources = listTileSources(assets);
-              const tilesets = sources.filter(s => s.kind === 'tileset');
-              const sprites  = sources.filter(s => s.kind === 'spriteSheet');
-              return (
-                <>
-                  {tilesets.length > 0 && (
-                    <optgroup label="Tilesets">
-                      {tilesets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </optgroup>
-                  )}
-                  {sprites.length > 0 && (
-                    <optgroup label="Sprite sheets (as tilesets)">
-                      {sprites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </optgroup>
-                  )}
-                </>
-              );
-            })()}
-          </select>
+          {(() => {
+            const sources = listTileSources(assets);
+            const tilesets = sources.filter(s => s.kind === 'tileset');
+            const sprites  = sources.filter(s => s.kind === 'spriteSheet');
+            const opts = [
+              {value:'',label:'— none —'},
+              ...tilesets.map(s => ({value:s.id,label:s.name})),
+              ...sprites.map(s => ({value:s.id,label:s.name})),
+            ];
+            return <Selector value={tm.tilesetAssetId || ''} onChange={v => patchTileMap({ tilesetAssetId: v || null })} options={opts} width="100%" />;
+          })()}
         </div>
 
         {(() => {
@@ -1766,26 +1664,21 @@ function Inspector({
 
         <div className="property-group">
           <label>AUTO JUMP (sec)</label>
-          <input 
-            type="number" 
-            min="0" 
-            value={activeScreen?.settings?.timeout || 0}
-            onChange={e => onUpdateScreen(activeScreen.id, { settings: { ...activeScreen.settings, timeout: parseInt(e.target.value, 10) || 0 } })}
+          <input
+            type="text" inputMode="numeric"
+            value={activeScreen?.settings?.timeout ?? ''}
+            onChange={e => onUpdateScreen(activeScreen.id, { settings: { ...activeScreen.settings, timeout: e.target.value } })}
+            onBlur={e => {
+              const n = parseInt(e.target.value, 10);
+              onUpdateScreen(activeScreen.id, { settings: { ...activeScreen.settings, timeout: isNaN(n) ? 0 : n } });
+            }}
             placeholder="0 = disabled"
           />
         </div>
         {(activeScreen?.settings?.timeout > 0) && (
           <div className="property-group">
             <label>NEXT SCREEN</label>
-            <select 
-              value={activeScreen?.settings?.nextScreenId || ''} 
-              onChange={e => onUpdateScreen(activeScreen.id, { settings: { ...activeScreen.settings, nextScreenId: e.target.value } })}
-            >
-              <option value="">-- Select Screen --</option>
-              {(screens || []).filter(s => s.id !== activeScreen.id).map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+            <Selector value={activeScreen?.settings?.nextScreenId || ''} onChange={v => onUpdateScreen(activeScreen.id, { settings: { ...activeScreen.settings, nextScreenId: v } })} options={[{value:'',label:'-- Select Screen --'}, ...(screens || []).filter(s => s.id !== activeScreen.id).map(s => ({value:s.id,label:s.name}))]} width="100%" />
           </div>
         )}
 
@@ -1796,8 +1689,15 @@ function Inspector({
             {['top','right','bottom','left'].map(side => (
               <div key={side} className="property-group">
                 <label>{side.toUpperCase()}</label>
-                <input type="number" min="0" max="200" value={canvasPadding[side] ?? 20}
-                  onChange={e => onCanvasPaddingChange({ ...canvasPadding, [side]: parseInt(e.target.value, 10) || 0 })} />
+                <input
+                  type="text" inputMode="numeric"
+                  value={canvasPadding[side] ?? ''}
+                  onChange={e => onCanvasPaddingChange({ ...canvasPadding, [side]: e.target.value })}
+                  onBlur={e => {
+                    const n = parseInt(e.target.value, 10);
+                    onCanvasPaddingChange({ ...canvasPadding, [side]: isNaN(n) ? 0 : Math.min(n, 200) });
+                  }}
+                />
               </div>
             ))}
           </div>
@@ -1827,22 +1727,18 @@ function Inspector({
             </div>
             <div className="property-group">
               <label>DEFAULT VIEWPORT (new levels)</label>
-              <select
-                value={activeScreen.worldSettings?.defaultViewport || 'topdown'}
-                onChange={e => onUpdateScreen(activeScreen.id, { worldSettings: { ...(activeScreen.worldSettings || {}), defaultViewport: e.target.value } })}
-              >
-                <option value="topdown">Top-down</option>
-                <option value="platformer">Platformer</option>
-                <option value="isometric">Isometric</option>
-                <option value="board">Board</option>
-              </select>
+              <Selector value={activeScreen.worldSettings?.defaultViewport || 'topdown'} onChange={v => onUpdateScreen(activeScreen.id, { worldSettings: { ...(activeScreen.worldSettings || {}), defaultViewport: v } })} options={[{value:'topdown',label:'Top-down'},{value:'platformer',label:'Platformer'},{value:'isometric',label:'Isometric'},{value:'board',label:'Board'}]} width="100%" />
             </div>
             <div className="property-group">
               <label>DEFAULT GRAVITY (new levels)</label>
               <input
-                type="number" step="10"
-                value={activeScreen.worldSettings?.defaultGravity ?? 0}
-                onChange={e => onUpdateScreen(activeScreen.id, { worldSettings: { ...(activeScreen.worldSettings || {}), defaultGravity: parseFloat(e.target.value) || 0 } })}
+                type="text" inputMode="numeric"
+                value={activeScreen.worldSettings?.defaultGravity ?? ''}
+                onChange={e => onUpdateScreen(activeScreen.id, { worldSettings: { ...(activeScreen.worldSettings || {}), defaultGravity: e.target.value } })}
+                onBlur={e => {
+                  const n = parseFloat(e.target.value);
+                  onUpdateScreen(activeScreen.id, { worldSettings: { ...(activeScreen.worldSettings || {}), defaultGravity: isNaN(n) ? 0 : n } });
+                }}
               />
             </div>
             <div style={{ color: 'var(--text-dim)', fontSize: 10, marginTop: 6 }}>
@@ -1916,26 +1812,14 @@ function Inspector({
       <div className="property-group">
         <div className="al-section-title">DYNAMIC CONTENT</div>
         <label>CONTENT TYPE</label>
-        <select value={localProps.dataSourceType||'manual'} onChange={e => updateAndCommit('dataSourceType', e.target.value)}>
-          <option value="manual">Static Content (Manual)</option>
-          <option value="database">Dynamic Data (Linked)</option>
-        </select>
+        <Selector value={localProps.dataSourceType||'manual'} onChange={v => updateAndCommit('dataSourceType', v)} options={[{value:'manual',label:'Static Content (Manual)'},{value:'database',label:'Dynamic Data (Linked)'}]} width="100%" />
 
         {localProps.dataSourceType === 'database' && (
           <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {!isInherited && (
               <div>
                 <label>SOURCE TABLE</label>
-                <select 
-                  value={localProps.dataSourceTable || ''} 
-                  onChange={e => {
-                    updateAndCommit('dataSourceTable', e.target.value);
-                    updateAndCommit('dataField', ''); 
-                  }}
-                >
-                  <option value="">-- Select Table --</option>
-                  {tableNames.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
+                <Selector value={localProps.dataSourceTable || ''} onChange={v => { updateAndCommit('dataSourceTable', v); updateAndCommit('dataField', ''); }} options={[{value:'',label:'-- Select Table --'}, ...tableNames.map(t => ({value:t,label:t}))]} width="100%" />
               </div>
             )}
             
@@ -1948,13 +1832,7 @@ function Inspector({
             {(selectedTable) && (
               <div>
                 <label>MAPPING FIELD</label>
-                <select 
-                  value={localProps.dataField || ''} 
-                  onChange={e => updateAndCommit('dataField', e.target.value)}
-                >
-                  <option value="">-- Select Field --</option>
-                  {fields.map(f => <option key={f.name} value={f.name}>{f.name} ({f.type})</option>)}
-                </select>
+                <Selector value={localProps.dataField || ''} onChange={v => updateAndCommit('dataField', v)} options={[{value:'',label:'-- Select Field --'}, ...fields.map(f => ({value:f.name,label:`${f.name} (${f.type})`}))]} width="100%" />
               </div>
             )}
 
@@ -2075,10 +1953,7 @@ function Inspector({
         <div className="property-group"><label>TITLE</label><input type="text" value={localProps.title||''} onChange={e => updateAndCommit('title', e.target.value)} /></div>
         {renderNumber('width','WIDTH (px)','400')}
         <div className="property-group"><label>HEIGHT</label>
-          <select value={localProps.height||''} onChange={e => updateAndCommit('height', e.target.value)}>
-            <option value="">Auto</option>
-            {[200,300,400,500,600,700,800].map(h => <option key={h} value={h}>{h}px</option>)}
-          </select>
+          <Selector value={String(localProps.height||'')} onChange={v => updateAndCommit('height', v)} options={[{value:'',label:'Auto'}, ...[200,300,400,500,600,700,800].map(h => ({value:String(h),label:`${h}px`}))]} width="100%" />
         </div>
         {renderColor('TEXT COLOR','textColor','#00ff00')}
         {renderColor('BACKGROUND','bgColor','#000000', true)}
@@ -2126,12 +2001,7 @@ function Inspector({
         {localProps.bgImage && (
           <div className="property-group">
             <label>FIT</label>
-            <select value={localProps.bgImageFit || 'cover'} onChange={e => updateAndCommit('bgImageFit', e.target.value)}>
-              <option value="cover">Cover (crop to fill)</option>
-              <option value="contain">Contain (fit inside)</option>
-              <option value="fill">Fill (stretch to size)</option>
-              <option value="tile">Tile (repeat)</option>
-            </select>
+            <Selector value={localProps.bgImageFit || 'cover'} onChange={v => updateAndCommit('bgImageFit', v)} options={[{value:'cover',label:'Cover (crop to fill)'},{value:'contain',label:'Contain (fit inside)'},{value:'fill',label:'Fill (stretch to size)'},{value:'tile',label:'Tile (repeat)'}]} width="100%" />
           </div>
         )}
 
@@ -2143,11 +2013,7 @@ function Inspector({
         {localProps.showClose && (
           <div className="property-group">
             <label>CLOSE ACTION</label>
-            <select value={localProps.closeNextScreenId||''} onChange={e => updateAndCommit('closeNextScreenId', e.target.value)}>
-              <option value="">-- Select --</option>
-              <option value="__close_window__">Close Window</option>
-              {(screens||[]).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            <Selector value={localProps.closeNextScreenId||''} onChange={v => updateAndCommit('closeNextScreenId', v)} options={[{value:'',label:'-- Select --'},{value:'__close_window__',label:'Close Window'}, ...(screens||[]).map(s => ({value:s.id,label:s.name}))]} width="100%" />
           </div>
         )}
       </>);
@@ -2157,14 +2023,10 @@ function Inspector({
         {renderNumber('height','HEIGHT (px)','auto')}
         {renderNumber('fontSize','FONT SIZE (px)','12')}
         <div className="property-group"><label>ALIGNMENT</label>
-          <select value={localProps.alignment||'left'} onChange={e => updateAndCommit('alignment', e.target.value)}>
-            <option value="left">Left</option><option value="center">Center</option><option value="right">Right</option>
-          </select>
+          <Selector value={localProps.alignment||'left'} onChange={v => updateAndCommit('alignment', v)} options={[{value:'left',label:'Left'},{value:'center',label:'Center'},{value:'right',label:'Right'}]} width="100%" />
         </div>
         <div className="property-group"><label>BORDER STYLE</label>
-          <select value={localProps.borderStyle||'single'} onChange={e => updateAndCommit('borderStyle', e.target.value)}>
-            <option value="single">Single</option><option value="double">Double</option><option value="dashed">Dashed</option>
-          </select>
+          <Selector value={localProps.borderStyle||'single'} onChange={v => updateAndCommit('borderStyle', v)} options={[{value:'single',label:'Single'},{value:'double',label:'Double'},{value:'dashed',label:'Dashed'}]} width="100%" />
         </div>
         {renderColor('TEXT COLOR','textColor','#ffff00')}
         {renderColor('BACKGROUND','bgColor','#000000', true)}
@@ -2182,22 +2044,11 @@ function Inspector({
         {renderColor('BORDER COLOR','borderColor','#00ff00')}
         <div className="property-divider" />
         <div className="property-group"><label>ACTION</label>
-          <select value={localProps.action||'none'} onChange={e => updateAndCommit('action', e.target.value)}>
-            <option value="none">None</option>
-            <option value="screen">Navigate to Screen</option>
-            {activeScreen?.kind === 'world' && <option value="level">Go to Level</option>}
-            <option value="overlay">Open Overlay</option>
-            <option value="external">Open External Link</option>
-            <option value="email">Send Email</option>
-            <option value="submit">Submit Form (Save to DB)</option>
-          </select>
+          <Selector value={localProps.action||'none'} onChange={v => updateAndCommit('action', v)} options={[{value:'none',label:'None'},{value:'screen',label:'Navigate to Screen'}, ...(activeScreen?.kind === 'world' ? [{value:'level',label:'Go to Level'}] : []), {value:'overlay',label:'Open Overlay'},{value:'external',label:'Open External Link'},{value:'email',label:'Send Email'},{value:'submit',label:'Submit Form (Save to DB)'}]} width="100%" />
         </div>
         {localProps.action === 'screen' && (<>
           <div className="property-group"><label>TARGET SCREEN</label>
-            <select value={localProps.targetScreenId||''} onChange={e => updateAndCommit('targetScreenId', e.target.value)}>
-              <option value="">-- Select Screen --</option>
-              {(screens||[]).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            <Selector value={localProps.targetScreenId||''} onChange={v => updateAndCommit('targetScreenId', v)} options={[{value:'',label:'-- Select Screen --'}, ...(screens||[]).map(s => ({value:s.id,label:s.name}))]} width="100%" />
           </div>
           <div className="property-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <label style={{ margin: 0 }}>STAGGERED (overlay)</label>
@@ -2206,20 +2057,12 @@ function Inspector({
         </>)}
         {localProps.action === 'level' && (
           <div className="property-group"><label>TARGET LEVEL</label>
-            <select value={localProps.targetLevelId||''} onChange={e => updateAndCommit('targetLevelId', e.target.value)}>
-              <option value="">-- Select Level --</option>
-              {(screens||[]).filter(s => s.kind === 'world').flatMap(s =>
-                (s.levels||[]).map(l => <option key={l.id} value={l.id}>{s.name} · {l.name}</option>)
-              )}
-            </select>
+            <Selector value={localProps.targetLevelId||''} onChange={v => updateAndCommit('targetLevelId', v)} options={[{value:'',label:'-- Select Level --'}, ...(screens||[]).filter(s => s.kind === 'world').flatMap(s => (s.levels||[]).map(l => ({value:l.id,label:`${s.name} · ${l.name}`})))]} width="100%" />
           </div>
         )}
         {localProps.action === 'overlay' && (
           <div className="property-group"><label>TARGET OVERLAY</label>
-            <select value={localProps.targetOverlayId||''} onChange={e => updateAndCommit('targetOverlayId', e.target.value)}>
-              <option value="">-- Select Overlay --</option>
-              {(overlays||[]).map(ov => <option key={ov.id} value={ov.id}>{ov.props?.title || 'Overlay'}</option>)}
-            </select>
+            <Selector value={localProps.targetOverlayId||''} onChange={v => updateAndCommit('targetOverlayId', v)} options={[{value:'',label:'-- Select Overlay --'}, ...(overlays||[]).map(ov => ({value:ov.id,label:ov.props?.title || 'Overlay'}))]} width="100%" />
           </div>
         )}
         {localProps.action === 'external' && (
@@ -2238,21 +2081,12 @@ function Inspector({
           <div className="al-section-title">DATA SOURCE (Read)</div>
           <div className="property-group">
             <label>SOURCE TABLE</label>
-            <select 
-              value={localProps.sourceTable || ''} 
-              onChange={e => updateAndCommit('sourceTable', e.target.value)}
-            >
-              <option value="">-- None --</option>
-              {tableNames.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <Selector value={localProps.sourceTable || ''} onChange={v => updateAndCommit('sourceTable', v)} options={[{value:'',label:'-- None --'}, ...tableNames.map(t => ({value:t,label:t}))]} width="100%" />
           </div>
           {localProps.sourceTable && (
             <div className="property-group">
               <label>FILTER BY FIELD</label>
-              <select value={localProps.filterField || ''} onChange={e => updateAndCommit('filterField', e.target.value)}>
-                <option value="">-- No Filter --</option>
-                {sourceFields.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
-              </select>
+              <Selector value={localProps.filterField || ''} onChange={v => updateAndCommit('filterField', v)} options={[{value:'',label:'-- No Filter --'}, ...sourceFields.map(f => ({value:f.name,label:f.name}))]} width="100%" />
             </div>
           )}
           {localProps.sourceTable && localProps.filterField && (
@@ -2265,13 +2099,7 @@ function Inspector({
           <div className="al-section-title">TARGET (Write)</div>
           <div className="property-group">
             <label>TARGET TABLE (Save to)</label>
-            <select 
-              value={localProps.targetTable || ''} 
-              onChange={e => updateAndCommit('targetTable', e.target.value)}
-            >
-              <option value="">-- Select Table --</option>
-              {tableNames.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <Selector value={localProps.targetTable || ''} onChange={v => updateAndCommit('targetTable', v)} options={[{value:'',label:'-- Select Table --'}, ...tableNames.map(t => ({value:t,label:t}))]} width="100%" />
           </div>
           <div className="property-divider" />
         </>);
@@ -2329,28 +2157,16 @@ function Inspector({
           </div>
           {renderNumber('fontSize','FONT SIZE (px)','12')}
           <div className="property-group"><label>ALIGNMENT</label>
-            <select value={localProps.alignment||'left'} onChange={e => updateAndCommit('alignment', e.target.value)}>
-              <option value="left">Left</option><option value="center">Center</option><option value="right">Right</option>
-            </select>
+            <Selector value={localProps.alignment||'left'} onChange={v => updateAndCommit('alignment', v)} options={[{value:'left',label:'Left'},{value:'center',label:'Center'},{value:'right',label:'Right'}]} width="100%" />
           </div>
           {renderColor('TEXT COLOR','textColor','#00ff00')}
           <div className="property-divider" />
           <div className="property-group"><label>ACTION</label>
-            <select value={localProps.action||'none'} onChange={e => updateAndCommit('action', e.target.value)}>
-              <option value="none">None</option>
-              <option value="screen">Navigate to Screen</option>
-              <option value="overlay">Open Overlay</option>
-              <option value="external">Open External Link</option>
-              <option value="email">Send Email</option>
-              {activeScreen?.kind === 'world' && <option value="level">Go to Level</option>}
-            </select>
+            <Selector value={localProps.action||'none'} onChange={v => updateAndCommit('action', v)} options={[{value:'none',label:'None'},{value:'screen',label:'Navigate to Screen'},{value:'overlay',label:'Open Overlay'},{value:'external',label:'Open External Link'},{value:'email',label:'Send Email'}, ...(activeScreen?.kind === 'world' ? [{value:'level',label:'Go to Level'}] : [])]} width="100%" />
           </div>
           {localProps.action === 'screen' && (<>
             <div className="property-group"><label>TARGET SCREEN</label>
-              <select value={localProps.targetScreenId||''} onChange={e => updateAndCommit('targetScreenId', e.target.value)}>
-                <option value="">-- Select Screen --</option>
-                {(screens||[]).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              <Selector value={localProps.targetScreenId||''} onChange={v => updateAndCommit('targetScreenId', v)} options={[{value:'',label:'-- Select Screen --'}, ...(screens||[]).map(s => ({value:s.id,label:s.name}))]} width="100%" />
             </div>
             <div className="property-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <label style={{ margin: 0 }}>STAGGERED (overlay)</label>
@@ -2359,10 +2175,7 @@ function Inspector({
           </>)}
           {localProps.action === 'overlay' && (
             <div className="property-group"><label>TARGET OVERLAY</label>
-              <select value={localProps.targetOverlayId||''} onChange={e => updateAndCommit('targetOverlayId', e.target.value)}>
-                <option value="">-- Select Overlay --</option>
-                {(overlays||[]).map(ov => <option key={ov.id} value={ov.id}>{ov.props?.title || 'Overlay'}</option>)}
-              </select>
+              <Selector value={localProps.targetOverlayId||''} onChange={v => updateAndCommit('targetOverlayId', v)} options={[{value:'',label:'-- Select Overlay --'}, ...(overlays||[]).map(ov => ({value:ov.id,label:ov.props?.title || 'Overlay'}))]} width="100%" />
             </div>
           )}
           {localProps.action === 'external' && (
@@ -2373,12 +2186,7 @@ function Inspector({
           )}
           {localProps.action === 'level' && (
             <div className="property-group"><label>TARGET LEVEL</label>
-              <select value={localProps.targetLevelId||''} onChange={e => updateAndCommit('targetLevelId', e.target.value)}>
-                <option value="">-- Select Level --</option>
-                {(screens||[]).filter(s => s.kind === 'world').flatMap(s =>
-                  (s.levels||[]).map(l => <option key={l.id} value={l.id}>{s.name} · {l.name}</option>)
-                )}
-              </select>
+              <Selector value={localProps.targetLevelId||''} onChange={v => updateAndCommit('targetLevelId', v)} options={[{value:'',label:'-- Select Level --'}, ...(screens||[]).filter(s => s.kind === 'world').flatMap(s => (s.levels||[]).map(l => ({value:l.id,label:`${s.name} · ${l.name}`})))]} width="100%" />
             </div>
           )}
         </>);
@@ -2391,18 +2199,13 @@ function Inspector({
         <div className="property-divider" />
         {renderNumber('width','WIDTH (px)','150')}
         <div className="property-group"><label>INPUT TYPE</label>
-          <select value={localProps.inputType||'text'} onChange={e => updateAndCommit('inputType', e.target.value)}>
-            <option value="text">Text</option><option value="password">Password</option><option value="number">Number</option><option value="email">Email</option>
-          </select>
+          <Selector value={localProps.inputType||'text'} onChange={v => updateAndCommit('inputType', v)} options={[{value:'text',label:'Text'},{value:'password',label:'Password'},{value:'number',label:'Number'},{value:'email',label:'Email'}]} width="100%" />
         </div>
         <div className="property-divider" />
         <div className="property-group"><label>OTP MODE</label><input type="checkbox" checked={localProps.isOTP||false} onChange={e => updateAndCommit('isOTP', e.target.checked)} /></div>
         {localProps.isOTP && (
           <div className="property-group"><label>DIGITS</label>
-            <select value={localProps.digits||4} onChange={e => updateAndCommit('digits', parseInt(e.target.value))}>
-              <option value={4}>4 Digits</option>
-              <option value={6}>6 Digits</option>
-            </select>
+            <Selector value={String(localProps.digits||4)} onChange={v => updateAndCommit('digits', parseInt(v))} options={[{value:'4',label:'4 Digits'},{value:'6',label:'6 Digits'}]} width="100%" />
           </div>
         )}
         <div className="property-divider" />
@@ -2427,9 +2230,7 @@ function Inspector({
       </>);
       case 'Shape': return (<>
         <div className="property-group"><label>SHAPE</label>
-          <select value={localProps.shapeType||'rectangle'} onChange={e => updateAndCommit('shapeType', e.target.value)}>
-            <option value="rectangle">Rectangle</option><option value="circle">Circle</option><option value="square">Square</option>
-          </select>
+          <Selector value={localProps.shapeType||'rectangle'} onChange={v => updateAndCommit('shapeType', v)} options={[{value:'rectangle',label:'Rectangle'},{value:'circle',label:'Circle'},{value:'square',label:'Square'}]} width="100%" />
         </div>
         {renderNumber('width','WIDTH (px)','60')}
         {renderNumber('height','HEIGHT (px)','40')}
@@ -2440,11 +2241,7 @@ function Inspector({
       case 'Line': return (<>
         {renderNumber('thickness','THICKNESS (px)','1')}
         <div className="property-group"><label>LINE STYLE</label>
-          <select value={localProps.lineStyle||'solid'} onChange={e => updateAndCommit('lineStyle', e.target.value)}>
-            <option value="solid">Solid</option>
-            <option value="double">Double</option>
-            <option value="dashed">Dashed</option>
-          </select>
+          <Selector value={localProps.lineStyle||'solid'} onChange={v => updateAndCommit('lineStyle', v)} options={[{value:'solid',label:'Solid'},{value:'double',label:'Double'},{value:'dashed',label:'Dashed'}]} width="100%" />
         </div>
         {renderColor('COLOR','color','#00ff00')}
       </>);
@@ -2550,32 +2347,35 @@ function Inspector({
         {renderNumber('interval','INTERVAL (ms)','1000')}
         <div className="property-group"><label>ENABLED</label><input type="checkbox" checked={localProps.enabled||false} onChange={e => updateAndCommit('enabled', e.target.checked)} /></div>
       </>);
+      case 'Selector':
       case 'ComboBox': return (<>
-        <div className="al-section-title">OPTIONS SOURCE (The List)</div>
+        <div className="al-section-title">OPTIONS SOURCE</div>
+        {!localProps.optionTable && (
+          <div className="property-group">
+            <label>OPTIONS (comma separated)</label>
+            <input
+              type="text"
+              value={(localProps.items || ['Option 1', 'Option 2', 'Option 3']).join(', ')}
+              onChange={e => updateAndCommit('items', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+              placeholder="Option 1, Option 2, Option 3"
+            />
+          </div>
+        )}
         <div className="property-group">
           <label>SOURCE TABLE</label>
-          <select value={localProps.optionTable||''} onChange={e => updateAndCommit('optionTable', e.target.value)}>
-            <option value="">-- Select Table --</option>
-            {Object.keys(database?.data||{}).map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
+          <Selector value={localProps.optionTable||''} onChange={v => updateAndCommit('optionTable', v)} options={[{value:'',label:'-- Manual (above) --'}, ...Object.keys(database?.data||{}).map(t => ({value:t,label:t}))]} width="100%" />
         </div>
         {localProps.optionTable && (
           <div className="property-group">
             <label>DISPLAY FIELD</label>
-            <select value={localProps.optionField||''} onChange={e => updateAndCommit('optionField', e.target.value)}>
-              <option value="">-- Select Field --</option>
-              {((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
-            </select>
+            <Selector value={localProps.optionField||''} onChange={v => updateAndCommit('optionField', v)} options={[{value:'',label:'-- Select Field --'}, ...((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => ({value:f.name,label:f.name}))]} width="100%" />
           </div>
         )}
         {localProps.optionTable && (
           <>
             <div className="property-group">
               <label>FILTER BY FIELD</label>
-              <select value={localProps.optionFilterField||''} onChange={e => updateAndCommit('optionFilterField', e.target.value)}>
-                <option value="">-- No Filter --</option>
-                {((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
-              </select>
+              <Selector value={localProps.optionFilterField||''} onChange={v => updateAndCommit('optionFilterField', v)} options={[{value:'',label:'-- No Filter --'}, ...((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => ({value:f.name,label:f.name}))]} width="100%" />
             </div>
             {localProps.optionFilterField && (
               <div className="property-group">
@@ -2589,7 +2389,7 @@ function Inspector({
         {renderDataBinding()}
         <div className="property-divider" />
         {renderNumber('width','WIDTH (px)','150')}
-        <div className="property-group"><label>SELECTED INDEX</label><input type="number" value={localProps.selectedIndex||0} onChange={e => updateAndCommit('selectedIndex', parseInt(e.target.value))} /></div>
+        <div className="property-group"><label>SELECTED INDEX</label><input type="text" inputMode="numeric" value={localProps.selectedIndex ?? ''} onChange={e => updateLocal('selectedIndex', e.target.value)} onBlur={() => { const n = parseInt(localProps.selectedIndex, 10); updateAndCommit('selectedIndex', isNaN(n) ? 0 : n); }} /></div>
         {renderColor('TEXT COLOR','textColor','#00ff00')}
         {renderColor('BORDER COLOR','borderColor','#00ff00')}
         {renderColor('BACKGROUND','bgColor','#000000', true)}
@@ -2598,28 +2398,19 @@ function Inspector({
         <div className="al-section-title">OPTIONS SOURCE (The List)</div>
         <div className="property-group">
           <label>SOURCE TABLE</label>
-          <select value={localProps.optionTable||''} onChange={e => updateAndCommit('optionTable', e.target.value)}>
-            <option value="">-- Select Table --</option>
-            {Object.keys(database?.data||{}).map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
+          <Selector value={localProps.optionTable||''} onChange={v => updateAndCommit('optionTable', v)} options={[{value:'',label:'-- Select Table --'}, ...Object.keys(database?.data||{}).map(t => ({value:t,label:t}))]} width="100%" />
         </div>
         {localProps.optionTable && (
           <div className="property-group">
             <label>DISPLAY FIELD</label>
-            <select value={localProps.optionField||''} onChange={e => updateAndCommit('optionField', e.target.value)}>
-              <option value="">-- Select Field --</option>
-              {((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
-            </select>
+            <Selector value={localProps.optionField||''} onChange={v => updateAndCommit('optionField', v)} options={[{value:'',label:'-- Select Field --'}, ...((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => ({value:f.name,label:f.name}))]} width="100%" />
           </div>
         )}
         {localProps.optionTable && (
           <>
             <div className="property-group">
               <label>FILTER BY FIELD</label>
-              <select value={localProps.optionFilterField||''} onChange={e => updateAndCommit('optionFilterField', e.target.value)}>
-                <option value="">-- No Filter --</option>
-                {((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
-              </select>
+              <Selector value={localProps.optionFilterField||''} onChange={v => updateAndCommit('optionFilterField', v)} options={[{value:'',label:'-- No Filter --'}, ...((database?.tables||[]).find(t => t.name === localProps.optionTable)?.fields||[]).map(f => ({value:f.name,label:f.name}))]} width="100%" />
             </div>
             {localProps.optionFilterField && (
               <div className="property-group">
@@ -2653,16 +2444,11 @@ function Inspector({
           <button onClick={() => window.openDatabasePanel?.()} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 9, cursor: 'pointer', textDecoration: 'underline' }}>Manage Data</button>
         </div>
         <div className="property-group"><label>SOURCE TYPE</label>
-          <select value={localProps.dataSourceType||'manual'} onChange={e => updateAndCommit('dataSourceType', e.target.value)}>
-            <option value="manual">Manual</option><option value="database">Database Table</option>
-          </select>
+          <Selector value={localProps.dataSourceType||'manual'} onChange={v => updateAndCommit('dataSourceType', v)} options={[{value:'manual',label:'Manual'},{value:'database',label:'Database Table'}]} width="100%" />
         </div>
         {localProps.dataSourceType === 'database' && (database?.tables||[]).length > 0 && (
           <div className="property-group"><label>TABLE</label>
-            <select value={localProps.dataSource||''} onChange={e => updateAndCommit('dataSource', e.target.value)}>
-              <option value="">-- Select --</option>
-              {(database.tables||[]).map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
-            </select>
+            <Selector value={localProps.dataSource||''} onChange={v => updateAndCommit('dataSource', v)} options={[{value:'',label:'-- Select --'}, ...(database.tables||[]).map(t => ({value:t.name,label:t.name}))]} width="100%" />
           </div>
         )}
         <div className="property-divider" />
@@ -2715,17 +2501,11 @@ function Inspector({
           <div className="al-section-title">DATA SOURCE</div>
           <div className="property-group">
             <label>TABLE</label>
-            <select value={localProps.tableName||''} onChange={e => updateAndCommit('tableName', e.target.value)}>
-              <option value="">-- Select Table --</option>
-              {(database?.tables||[]).map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
-            </select>
+            <Selector value={localProps.tableName||''} onChange={v => updateAndCommit('tableName', v)} options={[{value:'',label:'-- Select Table --'}, ...(database?.tables||[]).map(t => ({value:t.name,label:t.name}))]} width="100%" />
           </div>
           <div className="property-group">
             <label>FILTER BY FIELD</label>
-            <select value={localProps.filterField || ''} onChange={e => updateAndCommit('filterField', e.target.value)}>
-              <option value="">-- No Filter --</option>
-              {fields.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
-            </select>
+            <Selector value={localProps.filterField || ''} onChange={v => updateAndCommit('filterField', v)} options={[{value:'',label:'-- No Filter --'}, ...fields.map(f => ({value:f.name,label:f.name}))]} width="100%" />
           </div>
           {localProps.filterField && (
             <div className="property-group">
@@ -2747,9 +2527,7 @@ function Inspector({
           {(database?.tables||[]).length > 0 && <datalist id="table-list-insp">{(database.tables||[]).map(t => <option key={t.name} value={t.name} />)}</datalist>}
         </div>
         <div className="property-group"><label>SOURCE</label>
-          <select value={localProps.dataSource||'sqlite'} onChange={e => updateAndCommit('dataSource', e.target.value)}>
-            <option value="sqlite">SQLite</option><option value="json">JSON</option><option value="api">API</option>
-          </select>
+          <Selector value={localProps.dataSource||'sqlite'} onChange={v => updateAndCommit('dataSource', v)} options={[{value:'sqlite',label:'SQLite'},{value:'json',label:'JSON'},{value:'api',label:'API'}]} width="100%" />
         </div>
         <div className="property-group"><label>QUERY / PATH</label>
           <input type="text" value={localProps.query||''} onChange={e => updateAndCommit('query', e.target.value)} />
@@ -2757,12 +2535,7 @@ function Inspector({
       </>);
       case 'Loader': return (<>
         <div className="property-group"><label>TYPE</label>
-          <select value={localProps.loaderType||'spinner'} onChange={e => updateAndCommit('loaderType', e.target.value)}>
-            <option value="spinner">Spinner</option>
-            <option value="dots">Dots</option>
-            <option value="bar">Bar</option>
-            <option value="bounce">Bounce</option>
-          </select>
+          <Selector value={localProps.loaderType||'spinner'} onChange={v => updateAndCommit('loaderType', v)} options={[{value:'spinner',label:'Spinner'},{value:'dots',label:'Dots'},{value:'bar',label:'Bar'},{value:'bounce',label:'Bounce'}]} width="100%" />
         </div>
         {renderNumber('speed','SPEED (x)','1')}
         {renderNumber('thickness','THICKNESS','4')}
@@ -2786,9 +2559,7 @@ function Inspector({
           />
         </div>
         <div className="property-group"><label>ACTIVE TAB</label>
-          <select value={localProps.activeTabIndex||0} onChange={e => updateAndCommit('activeTabIndex', parseInt(e.target.value))}>
-            {(localProps.tabs||[]).map((t, i) => <option key={i} value={i}>{t.label}</option>)}
-          </select>
+          <Selector value={String(localProps.activeTabIndex||0)} onChange={v => updateAndCommit('activeTabIndex', parseInt(v))} options={(localProps.tabs||[]).map((t, i) => ({value:String(i),label:t.label}))} width="100%" />
         </div>
       </>);
       case 'Overlay': return (<>
@@ -2803,25 +2574,11 @@ function Inspector({
         return (<>
           <div className="property-group">
             <label>WORLD</label>
-            <select
-              value={localProps.worldId || ''}
-              onChange={e => {
-                const w = worlds.find(s => s.id === e.target.value);
-                updateAndCommit('worldId', e.target.value);
-                setTimeout(() => updateAndCommit('worldName', w?.name || ''), 0);
-              }}
-            >
-              <option value="">-- Select World --</option>
-              {worlds.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-            </select>
+            <Selector value={localProps.worldId || ''} onChange={v => { const w = worlds.find(s => s.id === v); updateAndCommit('worldId', v); setTimeout(() => updateAndCommit('worldName', w?.name || ''), 0); }} options={[{value:'',label:'-- Select World --'}, ...worlds.map(w => ({value:w.id,label:w.name}))]} width="100%" />
           </div>
           <div className="property-group">
             <label>SCALING</label>
-            <select value={localProps.scaling || 'fit'} onChange={e => updateAndCommit('scaling', e.target.value)}>
-              <option value="fit">Fit</option>
-              <option value="fill">Fill</option>
-              <option value="fixed">Fixed</option>
-            </select>
+            <Selector value={localProps.scaling || 'fit'} onChange={v => updateAndCommit('scaling', v)} options={[{value:'fit',label:'Fit'},{value:'fill',label:'Fill'},{value:'fixed',label:'Fixed'}]} width="100%" />
           </div>
           {(localProps.scaling || 'fit') !== 'fixed' && (
             <div className="property-group">
@@ -2881,12 +2638,7 @@ function Inspector({
         <div className="property-group">
           <label>WIDTH MODE</label>
           <div style={{ display: 'flex', gap: 4 }}>
-            <select value={sizing.widthMode || 'fixed'} style={{ flex: 1 }}
-              onChange={e => onUpdate(component.id, { sizing: { ...sizing, widthMode: e.target.value } })}>
-              <option value="fixed">Fixed</option>
-              <option value="fill">Fill Container</option>
-              <option value="hug">Hug Contents</option>
-            </select>
+            <Selector value={sizing.widthMode || 'fixed'} onChange={v => onUpdate(component.id, { sizing: { ...sizing, widthMode: v } })} options={[{value:'fixed',label:'Fixed'},{value:'fill',label:'Fill Container'},{value:'hug',label:'Hug Contents'}]} containerStyle={{ flex: 1 }} />
             <input 
               type="text" 
               inputMode="numeric"
@@ -2912,12 +2664,7 @@ function Inspector({
         <div className="property-group">
           <label>HEIGHT MODE</label>
           <div style={{ display: 'flex', gap: 4 }}>
-            <select value={sizing.heightMode || 'hug'} style={{ flex: 1 }}
-              onChange={e => onUpdate(component.id, { sizing: { ...sizing, heightMode: e.target.value } })}>
-              <option value="fixed">Fixed</option>
-              <option value="fill">Fill Container</option>
-              <option value="hug">Hug Contents</option>
-            </select>
+            <Selector value={sizing.heightMode || 'hug'} onChange={v => onUpdate(component.id, { sizing: { ...sizing, heightMode: v } })} options={[{value:'fixed',label:'Fixed'},{value:'fill',label:'Fill Container'},{value:'hug',label:'Hug Contents'}]} containerStyle={{ flex: 1 }} />
             <input 
               type="text" 
               inputMode="numeric"

@@ -53,8 +53,8 @@ app.use('/api/auth', authRouter);
 // Protected API routes
 app.use('/api/projects', requireAuth, projectsRouter);
 app.use('/api/settings', requireAuth, settingsRouter);
-app.use('/api/assets', assetsRouter);
-app.use('/api/publish', publishRouter);
+app.use('/api/assets', requireAuth, assetsRouter);
+app.use('/api/publish', requireAuth, publishRouter);
 
 // Health check
 app.get('/health', (_req, res) => {

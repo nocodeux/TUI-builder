@@ -64,6 +64,8 @@ CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_demo     BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS demo_order  INT     NOT NULL DEFAULT 0;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS cloned_from TEXT;
+-- user_edited: true once the user saves the project — breaks sync with the source demo
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS user_edited BOOLEAN NOT NULL DEFAULT false;
 
 -- Track whether demo projects have already been seeded into a user's account
 ALTER TABLE users ADD COLUMN IF NOT EXISTS demos_seeded BOOLEAN NOT NULL DEFAULT false;
@@ -97,3 +99,12 @@ ALTER TABLE published_pages ADD COLUMN IF NOT EXISTS publish_mode TEXT NOT NULL 
 ALTER TABLE published_pages ALTER COLUMN world_id DROP NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_published_owner ON published_pages(owner_id);
 CREATE INDEX IF NOT EXISTS idx_published_slug  ON published_pages(owner_id, slug);
+
+-- ─── Token revocation blacklist ────────────────────────────────────────────────
+-- Stores revoked JWT IDs (jti claim) until the token would naturally expire.
+-- Cleaned opportunistically on logout and by periodic maintenance.
+CREATE TABLE IF NOT EXISTS token_blacklist (
+  jti        TEXT         PRIMARY KEY,
+  expires_at TIMESTAMPTZ  NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_token_blacklist_exp ON token_blacklist(expires_at);

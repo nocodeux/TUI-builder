@@ -21,6 +21,7 @@ import Row from './Componentes/Row';
 import CheckBox from './Componentes/CheckBox';
 import RadioButton from './Componentes/RadioButton';
 import ComboBox from './Componentes/ComboBox';
+import Selector from './Componentes/Selector';
 import ListBox from './Componentes/ListBox';
 import Data from './Componentes/Data';
 import Timer from './Componentes/Timer';
@@ -38,7 +39,7 @@ import GameEmbed from './Componentes/GameEmbed';
 
 const componentMap = {
   Window, Frame, Row, Button, Text, Label: Text, Input: TextBox, TextBox, CheckBox, RadioButton,
-  ComboBox, ListBox, Timer, Shape, Line, Image: ImageComp,
+  ComboBox, Selector, ListBox, Timer, Shape, Line, Image: ImageComp,
   HScrollBar: ScrollBar, VScrollBar: ScrollBar, Data, Table, Loader, Tabs, Overlay, DataRepeater, Form,
   GameEmbed,
 };

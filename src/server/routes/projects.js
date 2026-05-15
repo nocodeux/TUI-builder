@@ -80,7 +80,10 @@ projectsRouter.get('/:id/assets', async (req, res) => {
   const empty = { sprites: [], tilesets: [], sounds: [], backgrounds: [] };
   try {
     if (await useDb()) {
-      const { rows } = await query('SELECT assets_json FROM projects WHERE id = $1', [id]);
+      const owner = ownerId(req);
+      const { rows } = owner
+        ? await query('SELECT assets_json FROM projects WHERE id = $1 AND owner_id = $2', [id, owner])
+        : await query('SELECT assets_json FROM projects WHERE id = $1', [id]);
       return res.json(rows.length ? (rows[0].assets_json || empty) : empty);
     }
     ensureDir();
@@ -96,6 +99,7 @@ projectsRouter.get('/:id/assets', async (req, res) => {
 projectsRouter.post('/', async (req, res) => {
   const project = req.body;
   if (!project?.id) return res.status(400).json({ error: 'Project ID required' });
+  if (project.id === 'default') return res.status(400).json({ error: 'Invalid project ID' });
   try {
     if (await useDb()) {
       const owner = ownerId(req);
@@ -106,9 +110,35 @@ projectsRouter.post('/', async (req, res) => {
            SET name       = EXCLUDED.name,
                data       = EXCLUDED.data,
                owner_id   = COALESCE(projects.owner_id, EXCLUDED.owner_id),
-               last_saved = EXCLUDED.last_saved`,
+               last_saved = EXCLUDED.last_saved
+         WHERE projects.owner_id IS NULL OR projects.owner_id = EXCLUDED.owner_id`,
         [project.id, project.name || 'Untitled', JSON.stringify(project), owner, project.lastSaved ? new Date(project.lastSaved) : new Date()]
       );
+      // Break sync with source demo once user saves their own changes
+      if (owner) {
+        await query(
+          `UPDATE projects SET user_edited = true
+           WHERE id = $1 AND owner_id = $2 AND cloned_from IS NOT NULL AND NOT user_edited`,
+          [project.id, owner]
+        );
+      }
+      // If this is a demo project, immediately propagate name+data to all unedited user clones.
+      // Each clone keeps its own id embedded in data so we use jsonb_set to override only that field.
+      const { rows: demoCheck } = await query(
+        'SELECT is_demo FROM projects WHERE id = $1 AND is_demo = true', [project.id]
+      );
+      if (demoCheck.length) {
+        await query(
+          `UPDATE projects
+           SET name = $1,
+               data = jsonb_set(
+                 jsonb_set($2::jsonb, '{id}', to_jsonb(id::text), true),
+                 '{name}', to_jsonb($1::text), true
+               )
+           WHERE cloned_from = $3 AND NOT user_edited`,
+          [project.name || 'Untitled', JSON.stringify(project), project.id]
+        );
+      }
       return res.json({ success: true });
     }
     ensureDir();
@@ -123,13 +153,17 @@ projectsRouter.post('/', async (req, res) => {
 // ─── Save assets sidecar ───────────────────────────────────────────────────────
 projectsRouter.post('/:id/assets', async (req, res) => {
   const { id } = req.params;
+  if (id === 'default') return res.status(400).json({ error: 'Invalid project ID' });
   try {
     if (await useDb()) {
+      const owner = ownerId(req);
       await query(
-        `INSERT INTO projects (id, name, data, assets_json)
-         VALUES ($1, 'Untitled', '{}', $2)
-         ON CONFLICT (id) DO UPDATE SET assets_json = EXCLUDED.assets_json`,
-        [id, JSON.stringify(req.body)]
+        `INSERT INTO projects (id, name, data, assets_json, owner_id)
+         VALUES ($1, 'Untitled', '{}', $2, $3)
+         ON CONFLICT (id) DO UPDATE
+           SET assets_json = EXCLUDED.assets_json
+         WHERE projects.owner_id IS NULL OR projects.owner_id = EXCLUDED.owner_id`,
+        [id, JSON.stringify(req.body), owner]
       );
       return res.json({ success: true });
     }
@@ -147,8 +181,12 @@ projectsRouter.delete('/:id/assets', async (req, res) => {
   const { id } = req.params;
   try {
     if (await useDb()) {
+      const owner = ownerId(req);
       const empty = { sprites: [], tilesets: [], sounds: [], backgrounds: [] };
-      await query('UPDATE projects SET assets_json = $1 WHERE id = $2', [JSON.stringify(empty), id]);
+      const { rowCount } = owner
+        ? await query('UPDATE projects SET assets_json = $1 WHERE id = $2 AND owner_id = $3', [JSON.stringify(empty), id, owner])
+        : await query('UPDATE projects SET assets_json = $1 WHERE id = $2', [JSON.stringify(empty), id]);
+      if (!rowCount) return res.status(404).json({ error: 'Project not found' });
       return res.json({ success: true });
     }
     const filePath = path.join(projectsDir, `${id}.assets.json`);
@@ -167,10 +205,12 @@ projectsRouter.patch('/:id/demo', async (req, res) => {
   if (!await useDb()) return res.status(503).json({ error: 'Database required' });
   const { id } = req.params;
   const { isDemo, demoOrder } = req.body || {};
+  const owner = ownerId(req);
   try {
     const { rowCount } = await query(
-      `UPDATE projects SET is_demo = $1, demo_order = COALESCE($2, demo_order) WHERE id = $3`,
-      [Boolean(isDemo), demoOrder ?? null, id]
+      `UPDATE projects SET is_demo = $1, demo_order = COALESCE($2, demo_order)
+       WHERE id = $3 AND owner_id = $4`,
+      [Boolean(isDemo), demoOrder ?? null, id, owner]
     );
     if (!rowCount) return res.status(404).json({ error: 'Project not found' });
     res.json({ success: true });
@@ -190,6 +230,8 @@ projectsRouter.delete('/:id', async (req, res) => {
         ? await query('DELETE FROM projects WHERE id = $1 AND owner_id = $2', [id, owner])
         : await query('DELETE FROM projects WHERE id = $1', [id]);
       if (!rowCount) return res.status(404).json({ error: 'Project not found' });
+      // Remove all unedited clones that point to this project so users don't see orphaned demos
+      await query('DELETE FROM projects WHERE cloned_from = $1 AND NOT user_edited', [id]);
       return res.json({ success: true });
     }
     const filePath = path.join(projectsDir, `${id}.json`);

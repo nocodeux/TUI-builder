@@ -14,7 +14,7 @@ const PALETTE = [
   { kind: 'item', type: 'Input', label: 'Input' },
   { kind: 'item', type: 'CheckBox', label: 'CheckBox' },
   { kind: 'item', type: 'RadioButton', label: 'RadioButton' },
-  { kind: 'item', type: 'ComboBox', label: 'ComboBox' },
+  { kind: 'item', type: 'Selector', label: 'Selector' },
   { kind: 'item', type: 'ListBox', label: 'ListBox' },
   { kind: 'item', type: 'HScrollBar', label: 'ScrollH' },
   { kind: 'item', type: 'VScrollBar', label: 'ScrollV' },

@@ -71,6 +71,7 @@ function App() {
   const [editingProjectId, setEditingProjectId] = useState(null);
   const [editingProjectName, setEditingProjectName] = useState('');
   const [projectList, setProjectList] = useState([]);
+  const [projectLoadKey, setProjectLoadKey] = useState(0);
   const [currentUser, setCurrentUser] = useState(null);
   const [clipboard, setClipboard] = useState(null);
   const [history, setHistory] = useState([]);
@@ -193,10 +194,76 @@ function App() {
   };
 
   const handleLogout = () => {
+    // Revoke token on server (fire-and-forget)
+    apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+
+    // Cancel all pending saves immediately
     clearToken();
+    editsMade.current = false;
+    assetsDirty.current = false;
+    projectLoaded.current = false;
+    isInitialLoading.current = true;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    if (assetsSaveTimer.current) clearTimeout(assetsSaveTimer.current);
+
+    // Wipe localStorage session data
+    localStorage.removeItem('nanostudio_current_project');
+
+    // Reset ALL project state so no data leaks to the next user
+    setScreens([{ id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }]);
+    setCurrentScreenId('screen-1');
+    setSelectedIds([]);
+    setLastSelectedId(null);
+    setCurrentProject({ id: 'default', name: 'Untitled' });
+    setDatabase({ tables: [], data: {} });
+    setActiveWindow(null);
+    setGameMode(false);
+    setSelectedLevelId(null);
+    setLevelLayer('game');
+    setPaintBrush(null);
+    setSelectedColliderShapeId(null);
+    setSelectedOcclusionShapeId(null);
+    setIsPlaying(false);
+    setAssetsState({ sprites: [], tilesets: [], sounds: [], backgrounds: [] });
+    setHistory([]);
+    setHistoryIndex(-1);
+    setClipboard(null);
+    setViewMode('desktop');
+
+    // Reset user/session-scoped data
+    setProjectList([]);
+    setExternalApis([]);
+    setPublishedList([]);
+    setPublishSlug('');
+    setPublishTitle('');
+    setPublishDesc('');
+    setPublishStatus('idle');
+    setPublishUrl('');
+    setPublishError('');
+    setPublishMode('page');
+    setSaveStatus('');
+
+    // Close all panels/modals
+    setShowProjects(false);
+    setShowDatabase(false);
+    setShowSettings(false);
+    setShowPublish(false);
+    setShowExportMenu(false);
+    setShowSpriteSheetManager(false);
+    setConfirmModal(null);
+    setDownloadLink(null);
+
+    // Show login
     setCurrentUser(null);
     setShowLogin(true);
     setLoginMode('login');
+    setLoginEmail('');
+    setLoginPassword('');
+    setLoginError('');
+    setRegName('');
+    setRegEmail('');
+    setRegPassword('');
+    setRegConfirm('');
   };
 
   const handleRegister = async (e) => {
@@ -441,12 +508,14 @@ function App() {
   };
 
   useEffect(() => {
+    if (!currentUser) return;
     fetchProjects();
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
+    if (!currentUser) return;
     if (showProjects) fetchProjects();
-  }, [showProjects]);
+  }, [showProjects, currentUser]);
   // ── Sidecar assets persistence ───────────────────────────────────────────
   // Debounced 2s after any asset change. Skipped during initial load and when
   // there's no real project (id === 'default').
@@ -470,6 +539,8 @@ function App() {
 
   // ── Persistencia ──────────────────────────────────────────────────────────
   const triggerSave = useCallback(() => {
+    if (!getToken()) return;
+    if (!currentProject.id || currentProject.id === 'default') return;
     if (isInitialLoading.current) return;
     if (!projectLoaded.current) return;
     if (!editsMade.current) return;
@@ -564,7 +635,7 @@ function App() {
   }, [historyIndex, isUndoing]);
 
   const updateScreens = useCallback((newScreensOrFn, shouldSaveHistory = true) => {
-    if (!isInitialLoading.current) editsMade.current = true;
+    if (!isInitialLoading.current && currentProject.id && currentProject.id !== 'default') editsMade.current = true;
     setScreens(prev => {
       const next = typeof newScreensOrFn === 'function' ? newScreensOrFn(prev) : newScreensOrFn;
       if (shouldSaveHistory && !isInitialLoading.current) {
@@ -1603,7 +1674,13 @@ function App() {
 
 
 
-  useEffect(() => { localStorage.setItem('nanostudio_theme', theme); }, [theme]);
+  useEffect(() => {
+    localStorage.setItem('nanostudio_theme', theme);
+    // Apply theme to body so CSS variables reach portals rendered outside .app
+    const allThemes = ['theme-nano', 'theme-bios', 'theme-retro', 'theme-amber'];
+    document.body.classList.remove(...allThemes);
+    document.body.classList.add(theme);
+  }, [theme]);
   useEffect(() => { 
     localStorage.setItem('nanostudio_builder_name', builderName); 
     document.title = builderName;
@@ -1611,6 +1688,7 @@ function App() {
 
   // Load settings from server (builderName is global; externalApis are per-user)
   useEffect(() => {
+    if (!currentUser) return;
     apiFetch('/api/settings')
       .then(res => res.json())
       .then(data => {
@@ -1618,17 +1696,18 @@ function App() {
         if (data.externalApis) setExternalApis(data.externalApis);
       })
       .catch(err => console.error('Error loading settings:', err));
-  }, []);
+  }, [currentUser]);
 
   // Auto-save settings — builderName write is gated to admin on the server
   useEffect(() => {
+    if (!currentUser) return;
     if (isInitialLoading.current) return;
     apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ builderName, externalApis })
     }).catch(err => console.error('Error saving settings:', err));
-  }, [builderName, externalApis]);
+  }, [builderName, externalApis, currentUser]);
 
   useEffect(() => {
     if (!currentProject.id || currentProject.id === 'default') {
@@ -1636,6 +1715,7 @@ function App() {
       isInitialLoading.current = false;
       return;
     }
+    if (!currentUser) return;
 
     projectLoaded.current = false;
     isInitialLoading.current = true;
@@ -1675,10 +1755,12 @@ function App() {
       })
       .catch((err) => {
         console.error('Error loading project from API:', err);
-        // Don't mark as loaded — keeps auto-save blocked until user reloads the project
+        // Reset to default so a bad/foreign ID in localStorage can't keep polluting state
+        setCurrentProject({ id: 'default', name: 'Untitled' });
+        localStorage.removeItem('nanostudio_current_project');
         isInitialLoading.current = false;
       });
-  }, [currentProject.id]);
+  }, [currentProject.id, projectLoadKey, currentUser]);
 
   useEffect(() => {
     if (editsMade.current) triggerSave();
@@ -1970,14 +2052,15 @@ function App() {
         return wrapComponent(`<label class="retro-checkbox" style="color:${getThemeColor(p.textColor, '--text')};"><input type="checkbox" ${p.checked ? 'checked' : ''} /><span>${escapeHtml(p.text)}</span></label>`);
       case 'RadioButton':
         return wrapComponent(`<label class="retro-radio" style="color:${getThemeColor(p.textColor, '--text')};"><input type="radio" name="${escapeHtml(p.group || 'group1')}" ${p.checked ? 'checked' : ''} /><span>${escapeHtml(p.text)}</span></label>`);
+      case 'Selector':
       case 'ComboBox': {
-        const items = (p.items || []).map(item => `<option ${item === p.value ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('');
+        const items = (p.items?.length ? p.items : ['Option 1', 'Option 2', 'Option 3']).map(item => `<option ${item === p.value ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('');
         return wrapComponent(`<select class="retro-select" style="${styleObjToString({
           width: isWidthFill ? '100%' : (p.width ? `${p.width}px` : '150px'),
           height: isHeightFill ? '100%' : 'auto',
           borderColor: getThemeColor(p.borderColor, '--border'),
           color: getThemeColor(p.textColor, '--text'),
-          background: getThemeColor(p.bgColor, '--bg'),
+          backgroundColor: getThemeColor(p.bgColor, '--input-bg'),
         })}">${items}</select>`);
       }
       case 'ListBox': {
@@ -1987,7 +2070,7 @@ function App() {
           height: isHeightFill ? '100%' : (p.height ? `${p.height}px` : '100px'),
           borderColor: getThemeColor(p.borderColor, '--border'),
           color: getThemeColor(p.textColor, '--text'),
-          background: getThemeColor(p.bgColor, '--bg'),
+          backgroundColor: getThemeColor(p.bgColor, '--input-bg'),
         })}">${items}</select>`);
       }
       case 'HScrollBar':
@@ -2436,6 +2519,22 @@ body {
 .export-wrapper > * { max-width: 100%; }
 .export-wrapper { padding: 0 !important; border: none !important; outline: none !important; }
 .drop-zone, .new-row-drop, .drop-indicator { display: none !important; }
+.retro-select, .retro-listbox {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background-color: ${t.bg} !important;
+  background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjUiIHZpZXdCb3g9IjAgMCA4IDUiPjxwYXRoIGZpbGw9IiM4ODg4ODgiIGQ9Ik0wIDBsNCA1IDQtNXoiLz48L3N2Zz4=") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 7px center !important;
+  background-size: 8px 5px !important;
+  border: 1px solid ${t.border} !important;
+  color: ${t.text} !important;
+  padding: 3px 22px 3px 6px !important;
+  font-family: monospace !important;
+  font-size: 11px !important;
+  cursor: pointer !important;
+  box-sizing: border-box !important;
+}
 `;
 
     // Get webTitle from screen 1 settings, fallback to project name
@@ -2650,37 +2749,48 @@ ${(() => {
       const res = await apiFetch(`/api/projects/${id}`);
       if (!res.ok) return;
       const data = await res.json();
-      setCurrentProject({ id: data.id, name: data.name });
+      isInitialLoading.current = true;
+      projectLoaded.current = false;
+      // Always use the DB row id (not data.id from the JSON) so the load effect
+      // fetches from the correct row. Bumping loadKey forces the effect to re-run
+      // even when reloading the same project that's already active.
+      setCurrentProject({ id, name: data.name || 'Untitled' });
+      setProjectLoadKey(k => k + 1);
       setShowProjects(false);
     } catch (err) {
       console.error('Load error:', err);
     }
   };
 
-  const deleteProject = async (id) => {
-    if (!confirm('Delete project?')) return;
-    try {
-      await apiFetch(`/api/projects/${id}`, { method: 'DELETE' });
-      if (currentProject.id === id) {
-        isInitialLoading.current = true;
-        setCurrentProject({ id: 'default', name: 'Untitled' });
-        setScreens([{ id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }]);
-        setCurrentScreenId('screen-1');
-        setSelectedIds([]);
-        setActiveWindow(null);
-        setDatabase({ tables: [], data: {} });
-        setGameMode(false);
-        setAssetsState({ sprites: [], tilesets: [], sounds: [], backgrounds: [] });
-        assetsDirty.current = false;
-        
-        setTimeout(() => {
-          isInitialLoading.current = false;
-        }, 500);
-      }
-      fetchProjects();
-    } catch (err) {
-      console.error('Delete error:', err);
-    }
+  const deleteProject = (id, name) => {
+    setConfirmModal({
+      title: 'Delete Project',
+      message: `Delete "${name}"? This cannot be undone.`,
+      confirmText: 'Delete',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          await apiFetch(`/api/projects/${id}`, { method: 'DELETE' });
+          if (currentProject.id === id) {
+            isInitialLoading.current = true;
+            setCurrentProject({ id: 'default', name: 'Untitled' });
+            setScreens([{ id: 'screen-1', name: 'Screen 1', rows: [], settings: { timeout: 0, nextScreenId: null } }]);
+            setCurrentScreenId('screen-1');
+            setSelectedIds([]);
+            setActiveWindow(null);
+            setDatabase({ tables: [], data: {} });
+            setGameMode(false);
+            setAssetsState({ sprites: [], tilesets: [], sounds: [], backgrounds: [] });
+            assetsDirty.current = false;
+            setTimeout(() => { isInitialLoading.current = false; }, 500);
+          }
+          fetchProjects();
+        } catch (err) {
+          console.error('Delete error:', err);
+        }
+      },
+      onCancel: () => setConfirmModal(null),
+    });
   };
 
   const renameProject = async (id, name) => {
@@ -2699,6 +2809,31 @@ ${(() => {
       fetchProjects();
     } catch (err) {
       console.error('Rename error:', err);
+    }
+  };
+
+  const duplicateProject = async (proj) => {
+    try {
+      const res = await apiFetch(`/api/projects/${proj.id}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const assetsRes = await apiFetch(`/api/projects/${proj.id}/assets`);
+      const assetsData = assetsRes.ok ? await assetsRes.json() : { sprites: [], tilesets: [], sounds: [], backgrounds: [] };
+      const newId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const copy = { ...data, id: newId, name: `${data.name} (copy)`, lastSaved: new Date().toISOString() };
+      await apiFetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(copy),
+      });
+      await apiFetch(`/api/projects/${newId}/assets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(assetsData),
+      });
+      fetchProjects();
+    } catch (err) {
+      console.error('duplicateProject error:', err);
     }
   };
 
@@ -3173,7 +3308,7 @@ ${(() => {
                           {proj.isDemo && (
                             <span style={{ fontSize: 8, padding: '1px 4px', background: 'rgba(0,170,255,0.15)', border: '1px solid rgba(0,170,255,0.4)', color: '#00aaff', fontFamily: 'monospace', letterSpacing: 1 }}>DEMO</span>
                           )}
-                          {proj.clonedFrom && !proj.isDemo && (
+                          {proj.clonedFrom && !proj.isDemo && currentUser?.role !== 'admin' && (
                             <span style={{ fontSize: 8, padding: '1px 4px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-dim)', fontFamily: 'monospace', letterSpacing: 1 }}>from demo</span>
                           )}
                         </div>
@@ -3186,13 +3321,15 @@ ${(() => {
                           className="small-btn"
                           title={proj.isDemo ? 'Remove demo flag' : 'Set as demo project'}
                           onClick={() => toggleDemo(proj)}
-                          style={{ fontSize: 9, padding: '2px 5px', opacity: proj.isDemo ? 1 : 0.5, color: proj.isDemo ? '#00aaff' : 'var(--text-dim)', borderColor: proj.isDemo ? '#00aaff' : 'var(--border)' }}
+                          style={{ display: 'flex', alignItems: 'center', gap: 3, padding: 0, height: 28, paddingInline: 6, opacity: proj.isDemo ? 1 : 0.5, color: proj.isDemo ? '#00aaff' : 'var(--text-dim)', borderColor: proj.isDemo ? '#00aaff' : 'var(--border)', fontSize: 14 }}
                         >
-                          {proj.isDemo ? '★ demo' : '☆ demo'}
+                          {proj.isDemo ? '★' : '☆'}
+                          <span style={{ fontSize: 9 }}>demo</span>
                         </button>
                       )}
                       <button className="small-btn" onClick={() => loadProject(proj.id)}>Load</button>
-                      <button className="small-btn danger" onClick={() => deleteProject(proj.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, padding: 0 }}>
+                      <button className="small-btn" title="Duplicate project" onClick={() => duplicateProject(proj)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, padding: 0, fontSize: 16 }}>⧉</button>
+                      <button className="small-btn danger" onClick={() => deleteProject(proj.id, proj.name)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, padding: 0, fontSize: 14 }}>
                         <TrashIcon />
                       </button>
                     </div>
@@ -3445,7 +3582,7 @@ ${(() => {
                         <button className="modal-action-btn" style={{ fontSize: 11 }}
                           onClick={() => navigator.clipboard.writeText(publishUrl)}>Copy</button>
                         <a href={publishUrl} target="_blank" rel="noopener noreferrer"
-                          style={{ padding: '5px 10px', border: '1px solid var(--border)', color: 'var(--accent)', textDecoration: 'none', fontFamily: 'monospace', fontSize: 11 }}>Open</a>
+                          className="retro-mini-btn accent" style={{ padding: '5px 10px', fontSize: 11 }}>Open</a>
                       </div>
                       <button className="modal-action-btn" style={{ fontSize: 11 }} onClick={() => setPublishStatus('idle')}>Update / Re-publish</button>
                     </div>
@@ -3479,13 +3616,7 @@ ${(() => {
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                             {availableModes.map(m => (
                               <button key={m} onClick={() => setPublishMode(m)}
-                                style={{
-                                  padding: '8px 10px', border: '1px solid var(--border)',
-                                  background: publishMode === m ? 'var(--selected)' : 'transparent',
-                                  color: publishMode === m ? 'var(--text)' : 'var(--text-dim)',
-                                  fontFamily: 'monospace', fontSize: 11, textAlign: 'left', cursor: 'pointer',
-                                  display: 'flex', flexDirection: 'column', gap: 2,
-                                }}>
+                                className={`publish-mode-btn${publishMode === m ? ' active' : ''}`}>
                                 <span style={{ color: publishMode === m ? 'var(--accent)' : 'inherit', fontWeight: publishMode === m ? 'bold' : 'normal' }}>
                                   {publishMode === m ? '▶ ' : '  '}{modeLabel[m]}
                                 </span>
@@ -3584,23 +3715,23 @@ ${(() => {
                     <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 16 }}>
                       <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, letterSpacing: 1 }}>YOUR PUBLISHED ITEMS</div>
                       {publishedList.map(p => (
-                        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <span style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.title || p.slug}</span>
-                              {p.publish_mode && <span style={{ fontSize: 9, color: 'var(--text-dim)', border: '1px solid var(--border)', padding: '1px 4px', flexShrink: 0 }}>{p.publish_mode}</span>}
-                            </div>
-                            <div style={{ fontSize: 10, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.url}</div>
+                        <div key={p.id} style={{ border: '1px solid var(--border)', padding: '10px 12px', marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{p.title || p.slug}</span>
+                            {p.publish_mode && <span style={{ fontSize: 9, color: 'var(--text-dim)', border: '1px solid var(--border)', padding: '1px 4px', flexShrink: 0 }}>{p.publish_mode}</span>}
                           </div>
-                          <a href={p.url} target="_blank" rel="noopener noreferrer"
-                            style={{ fontSize: 10, padding: '3px 8px', border: '1px solid var(--border)', color: 'var(--text)', textDecoration: 'none', fontFamily: 'monospace', flexShrink: 0 }}>Open</a>
-                          {p.source_id === currentProject?.id && (
-                            <button onClick={() => handleRepublishItem(p)}
-                              disabled={publishStatus === 'publishing'}
-                              style={{ fontSize: 10, padding: '3px 8px', border: '1px solid var(--accent)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', fontFamily: 'monospace', flexShrink: 0 }}>Republish</button>
-                          )}
-                          <button onClick={() => handleUnpublish(p.slug)}
-                            style={{ fontSize: 10, padding: '3px 8px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-dim)', cursor: 'pointer', fontFamily: 'monospace', flexShrink: 0 }}>Remove</button>
+                          <div style={{ fontSize: 10, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.url}</div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <a href={p.url} target="_blank" rel="noopener noreferrer"
+                              className="retro-mini-btn">Open</a>
+                            {p.source_id === currentProject?.id && (
+                              <button onClick={() => handleRepublishItem(p)}
+                                disabled={publishStatus === 'publishing'}
+                                className="retro-mini-btn accent">Republish</button>
+                            )}
+                            <button onClick={() => handleUnpublish(p.slug)}
+                              className="retro-mini-btn">Remove</button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -3654,13 +3785,13 @@ ${(() => {
                     </div>
                     {loginError && <div style={{ color: '#ff4444', fontSize: 12, marginBottom: 12, fontFamily: 'monospace' }}>{loginError}</div>}
                     <div className="modal-divider" />
-                    <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'stretch', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', gap: 6 }}>
-                        <a href="/api/auth/x" style={{ fontSize: 11, padding: '4px 10px', border: '1px solid var(--border)', color: 'var(--text)', textDecoration: 'none', fontFamily: 'monospace' }}>𝕏</a>
-                        <a href="/api/auth/google" style={{ fontSize: 11, padding: '4px 10px', border: '1px solid var(--border)', color: 'var(--text)', textDecoration: 'none', fontFamily: 'monospace' }}>G</a>
+                        <a href="/api/auth/x" className="oauth-btn" style={{ aspectRatio: '1 / 1', padding: 0 }}>𝕏</a>
+                        <a href="/api/auth/google" className="oauth-btn">Google</a>
                       </div>
                       <button type="submit" className="modal-action-btn" disabled={loginLoading}
-                        style={{ background: 'var(--accent)', color: 'var(--bg)', minWidth: 80 }}>
+                        style={{ border: '1px solid var(--accent)', minWidth: 80, ...(loginLoading ? { background: 'var(--accent)', color: 'var(--bg)' } : {}) }}>
                         {loginLoading ? 'Signing in...' : 'Sign In'}
                       </button>
                     </div>
@@ -3694,7 +3825,7 @@ ${(() => {
                     <div className="modal-divider" />
                     <div style={{ marginTop: 12, textAlign: 'right' }}>
                       <button type="submit" className="modal-action-btn" disabled={loginLoading}
-                        style={{ background: 'var(--accent)', color: 'var(--bg)', minWidth: 80 }}>
+                        style={{ border: '1px solid var(--accent)', minWidth: 80, ...(loginLoading ? { background: 'var(--accent)', color: 'var(--bg)' } : {}) }}>
                         {loginLoading ? 'Creating account...' : 'Create Account'}
                       </button>
                     </div>
@@ -3722,10 +3853,10 @@ ${(() => {
                   <button className="modal-action-btn" onClick={() => setConfirmModal(null)}>
                     Cancel
                   </button>
-                  <button 
-                    className="modal-action-btn" 
+                  <button
+                    className="modal-action-btn"
                     onClick={confirmModal.onConfirm}
-                    style={{ background: 'var(--accent)', color: 'var(--bg)' }}
+                    style={{ border: '1px solid var(--accent)' }}
                   >
                     {confirmModal.confirmText || 'Confirm'}
                   </button>

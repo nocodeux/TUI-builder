@@ -15,6 +15,7 @@ import TextBox from '../components/Componentes/TextBox';
 import CheckBox from '../components/Componentes/CheckBox';
 import RadioButton from '../components/Componentes/RadioButton';
 import ComboBox from '../components/Componentes/ComboBox';
+import Selector from '../components/Componentes/Selector';
 import ListBox from '../components/Componentes/ListBox';
 import Shape from '../components/Componentes/Shape';
 import Line from '../components/Componentes/Line';
@@ -27,7 +28,7 @@ import Form from '../components/Componentes/Form';
 
 const componentMap = {
   Window, Frame, Button, Text, Label: Text, Input: TextBox, TextBox,
-  CheckBox, RadioButton, ComboBox, ListBox, Shape, Line,
+  CheckBox, RadioButton, ComboBox, Selector, ListBox, Shape, Line,
   Image: ImageComp, HScrollBar: ScrollBar, VScrollBar: ScrollBar,
   Loader, Tabs, DataRepeater, Form,
   // Row: intentionally excluded — rendered inline to avoid retro-row CSS
