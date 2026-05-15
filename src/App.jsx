@@ -75,6 +75,7 @@ function App() {
   const [projectLoadKey, setProjectLoadKey] = useState(0);
   const [currentUser, setCurrentUser] = useState(null);
   const [clipboard, setClipboard] = useState(null);
+  const [entityClipboard, setEntityClipboard] = useState(null);
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [gameMode, setGameMode] = useState(false);
@@ -1095,6 +1096,52 @@ function App() {
     setSelectedIds(prev => prev.filter(id => !ids.includes(id)));
   }, [updateScreens]);
 
+  const duplicateEntities = useCallback((worldId, levelId, entityIds) => {
+    const ids = Array.isArray(entityIds) ? entityIds : [entityIds];
+    const newIds = [];
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      return {
+        ...s,
+        levels: (s.levels || []).map(l => {
+          if (l.id !== levelId) return l;
+          const extras = [];
+          (l.entities || []).forEach(e => {
+            if (ids.includes(e.id)) {
+              const nid = mkId();
+              newIds.push(nid);
+              extras.push({ ...JSON.parse(JSON.stringify(e)), id: nid, position: { x: e.position.x + 32, y: e.position.y + 32 } });
+            }
+          });
+          return { ...l, entities: [...(l.entities || []), ...extras] };
+        }),
+      };
+    }));
+    setTimeout(() => { if (newIds.length > 0) setSelectedIds(newIds); }, 0);
+  }, [updateScreens]);
+
+  const copyEntity = useCallback((entityId, level) => {
+    const entity = (level?.entities || []).find(e => e.id === entityId);
+    if (entity) setEntityClipboard(JSON.parse(JSON.stringify(entity)));
+  }, []);
+
+  const pasteEntity = useCallback((worldId, levelId, level) => {
+    if (!entityClipboard) return;
+    const nid = mkId();
+    const pasted = { ...JSON.parse(JSON.stringify(entityClipboard)), id: nid, position: { x: entityClipboard.position.x + 32, y: entityClipboard.position.y + 32 } };
+    updateScreens(prev => prev.map(s => {
+      if (s.id !== worldId || s.kind !== 'world') return s;
+      return {
+        ...s,
+        levels: (s.levels || []).map(l => {
+          if (l.id !== levelId) return l;
+          return { ...l, entities: [...(l.entities || []), pasted] };
+        }),
+      };
+    }));
+    setSelectedIds([nid]);
+  }, [entityClipboard, updateScreens]);
+
   // ── Color Migration for Existing Components ──────────────────────────────
   useEffect(() => {
     const cleanProps = (props) => {
@@ -1653,25 +1700,40 @@ function App() {
       }
       if ((e.key === 'd' || e.key === 'D') && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        duplicateComponent(selectedIds);
+        const entityIds = selectedIds.filter(id => (activeLevel?.entities || []).some(en => en.id === id));
+        if (entityIds.length > 0 && activeLevel && activeScreen) {
+          duplicateEntities(activeScreen.id, activeLevel.id, entityIds);
+        } else {
+          duplicateComponent(selectedIds);
+        }
       }
       if ((e.key === 'c' || e.key === 'C') && (e.ctrlKey || e.metaKey)) {
         const tagName = e.target?.tagName;
         if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return;
         e.preventDefault();
-        copyComponent(selectedIds[selectedIds.length-1]);
+        const lastId = selectedIds[selectedIds.length - 1];
+        const isEntity = lastId && (activeLevel?.entities || []).some(en => en.id === lastId);
+        if (isEntity && activeLevel && activeScreen) {
+          copyEntity(lastId, activeLevel);
+        } else {
+          copyComponent(lastId);
+        }
       }
       if ((e.key === 'v' || e.key === 'V') && (e.ctrlKey || e.metaKey)) {
         const tagName = e.target?.tagName;
         if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return;
         e.preventDefault();
-        pasteComponent();
+        if (entityClipboard && activeLevel && activeScreen) {
+          pasteEntity(activeScreen.id, activeLevel.id, activeLevel);
+        } else {
+          pasteComponent();
+        }
       }
     };
 
     window.addEventListener('keydown', handleShortcuts);
     return () => window.removeEventListener('keydown', handleShortcuts);
-  }, [selectedIds, deleteComponent, duplicateComponent, copyComponent, pasteComponent, undo, redo, activeLevel, activeScreen, deleteEntities]);
+  }, [selectedIds, deleteComponent, duplicateComponent, duplicateEntities, copyComponent, copyEntity, pasteComponent, pasteEntity, entityClipboard, undo, redo, activeLevel, activeScreen, deleteEntities]);
 
 
 

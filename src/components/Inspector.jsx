@@ -2030,7 +2030,7 @@ function Inspector({
               placeholder="https://… or paste data URL"
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <label style={{ margin: 0, fontSize: 9, cursor: 'pointer', border: '1px solid var(--border)', padding: '2px 6px', background: 'rgba(255,255,255,0.05)' }}>
+              <label className="upload-file-label">
                 Upload File
                 <input
                   type="file"
@@ -2291,7 +2291,7 @@ function Inspector({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <input type="text" value={localProps.src||''} onChange={e => updateAndCommit('src', e.target.value)} placeholder="https://..." />
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <label style={{ margin: 0, fontSize: 9, cursor: 'pointer', border: '1px solid var(--border)', padding: '2px 6px', background: 'rgba(255,255,255,0.05)' }}>
+              <label className="upload-file-label">
                 Upload File
                 <input 
                   type="file" 
