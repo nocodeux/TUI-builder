@@ -407,7 +407,7 @@ function DraggableComponent({
         />
       )}
 
-      {!isEditingText && (
+      <div style={{ visibility: isEditingText ? 'hidden' : 'visible', display: 'contents' }}>
         <Component
           {...comp.props}
           id={comp.id}
@@ -427,7 +427,7 @@ function DraggableComponent({
         >
           {isContainer && renderContainerChildren()}
         </Component>
-      )}
+      </div>
     </div>
   );
 }
