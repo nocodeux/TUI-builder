@@ -2,7 +2,7 @@
 
 **Platform:** TUIFY — tuify.app  
 **Status:** Living document  
-**Last updated:** 2026-05-13  
+**Last updated:** 2026-05-15  
 **Scope:** Full platform — Builder, Game Builder, export, hosting, multiplayer, anti-cheat, LLM AI, agent API, database, deployment
 
 ---
@@ -2913,22 +2913,24 @@ Replacing Section 9 with the complete prioritized roadmap including everything a
 - [x] Export collapse fix (worlds filtered from HTML export)
 - [x] SVG image sizing fix
 
-### Phase 1 — Real server + DB (2 weeks)
-- [ ] Express server (`src/server/index.js`)
-- [ ] PostgreSQL schema (users, projects, worlds, assets, published_pages)
-- [ ] `/api/projects`, `/api/worlds`, `/api/assets` routes
-- [ ] Storage driver abstraction (local + S3-compatible)
+### Phase 1 — Real server + DB ✅ DONE
+- [x] Express server (`src/server/index.js`)
+- [x] PostgreSQL schema (users, projects, worlds, assets, published_pages)
+- [x] `/api/projects`, `/api/worlds`, `/api/assets` routes
+- [x] Storage driver abstraction (local + S3-compatible) — S3 env vars corrected for PaaS (S3_ENDPOINT, S3_BUCKET, S3_PUBLIC_URL, AWS_ACCESS_KEY_ID/SECRET)
 - [ ] Presigned upload flow for large files (> 10 MB)
-- [ ] Docker + docker-compose (app + postgres + optional MinIO)
-- [ ] Basic `/health` endpoint
+- [x] Docker / PaaS deployment (deployed to tiffanyatyc.com)
+- [x] Basic `/health` endpoint
 - [ ] Pino structured logging
 
-### Phase 2 — Auth (1 week)
-- [ ] Register / login / logout endpoints
-- [ ] JWT in httpOnly cookie
-- [ ] Auth middleware on all routes
-- [ ] Frontend: login/register modal
-- [ ] All data scoped to `req.user.id`
+### Phase 2 — Auth ✅ DONE
+- [x] Register / login / logout endpoints
+- [x] JWT — Bearer token (admin env var fallback + DB user lookup)
+- [x] Auth middleware on all routes
+- [x] Frontend: login/register modal
+- [x] All data scoped to `req.user.id`
+- [x] X (Twitter) OAuth2
+- [x] Google OAuth2 (requires FRONTEND_URL env var set in PaaS for redirect to work in production)
 
 ### Phase 3 — Observability (1 week, parallel with other phases)
 - [ ] Prometheus metrics middleware (HTTP, WS, game sessions, agent calls)
@@ -2942,12 +2944,12 @@ Replacing Section 9 with the complete prioritized roadmap including everything a
 - [ ] `ui_heatmap_events` table + ingest endpoint (`/api/telemetry/session`)
 - [ ] Admin heatmap viewer (click frequency overlay on Builder screenshot)
 
-### Phase 4 — Hosted publishing (1–2 weeks)
-- [ ] `published_pages` table + publish/unpublish routes
+### Phase 4 — Hosted publishing — PARTIAL
+- [x] `published_pages` table + publish/unpublish routes (`src/server/routes/publish.js`)
 - [ ] Export pipeline on server (same as client export, run server-side)
 - [ ] Upload generated HTML/assets to S3
 - [ ] `tuify.app/{username}/{slug}` routing (nginx + server handler)
-- [ ] "Publish" button in Builder toolbar
+- [x] "Publish" button in Builder toolbar
 - [ ] User profile page (`tuify.app/{username}`)
 - [ ] CDN cache invalidation on re-publish
 
@@ -2957,17 +2959,17 @@ Replacing Section 9 with the complete prioritized roadmap including everything a
 - [ ] `/api/stats/*` endpoints
 - [ ] Stats UI in the Builder sidebar (My Projects view)
 
-### Phase 6 — Game export + Web Component (1–2 weeks)
-- [ ] `vite.game.config.js` (library build)
-- [ ] `TuifyGameElement` Web Component
-- [ ] `hudExportRenderer.js` (port of `renderComponentExport`)
-- [ ] `exportGame(worldId)` in App.jsx → downloads `{WorldName}.html`
+### Phase 6 — Game export + Web Component — PARTIAL
+- [x] `vite.runtime.config.js` (standalone runtime build — `public/runtime/`)
+- [x] `src/runtime/standalone.js` + `src/runtime/gamePlayer.jsx` (hosted player shell)
+- [ ] `TuifyGameElement` Web Component (`<tuify-game>` custom element)
+- [x] Game export as standalone HTML — `exportGame()` downloads `{WorldName}.html`
 - [ ] `/play/{username}/{slug}` server route (hosted full-page player)
 - [ ] Worlds get a slug on save
 
-### Phase 7 — GameEmbed component (1 week)
-- [ ] `GameEmbed.jsx` component
-- [ ] Toolbox registration (Builder mode)
+### Phase 7 — GameEmbed component — PARTIAL
+- [x] `GameEmbed.jsx` component (+ `EmbedRuntime.jsx`) in Toolbox
+- [x] Toolbox registration (EMBED section in Builder mode)
 - [ ] `exportHTML` handles `GameEmbed` → `<tuify-game>` in output
 - [ ] `/api/games/:worldId/data` endpoint (lazy asset loading)
 
@@ -3071,7 +3073,175 @@ Replacing Section 9 with the complete prioritized roadmap including everything a
 
 ---
 
+## Design Token Color System
+
+**Status:** ✅ Complete (2026-05-14)  
+**Motivation:** Color pickers in the Inspector only accepted HEX or the native color wheel. Users could not bind element colors to theme design tokens, so when a theme changed, manually-set colors wouldn't update.
+
+### Current behavior
+
+`renderColor()` in `Inspector.jsx` is the single function that generates all ~25 color pickers across builder and game mode. Values are stored as:
+- `""` — implicit theme default (resolved by `getThemeColor()` using CSS var fallback)
+- `"#rrggbb"` — hardcoded hex (does NOT follow theme changes)
+
+### Target behavior: three-mode color picker
+
+```
+┌─────────────┐ ┌──┐
+│ #ff0000     │ │🎨│   ← existing: HEX input + color wheel
+└─────────────┘ └──┘
+[accent][text][bg][border][textDim]   ← NEW: design token swatches
+```
+
+When a token swatch is selected, the value stored is `var(--accent)` (a valid CSS value). This works in:
+- **Builder canvas** — CSS vars declared on `.app` div, inherited by all elements
+- **Exported HTML** — export CSS template already declares all `--*` vars
+- **Theme switching** — element automatically reflects the new theme's accent/text/bg
+
+### Design tokens exposed
+
+| Token | CSS variable | Typical use |
+|---|---|---|
+| accent | `var(--accent)` | Highlights, focus, primary actions |
+| text | `var(--text)` | Body text, labels |
+| textDim | `var(--text-dim)` | Placeholder, secondary text |
+| bg | `var(--bg)` | Panel and element backgrounds |
+| border | `var(--border)` | Borders, dividers |
+| selected | `var(--selected)` | Hover/selected state backgrounds |
+
+### Implementation scope — minimal, 2 files
+
+| File | Change | Status |
+|---|---|---|
+| `Inspector.jsx` → `renderColor()` | Add token swatch row; display token name in hex input when `var(--)` is active | ✅ Done |
+| `Inspector.jsx` → `TOKEN_SLOTS` + `isTokenValue` / `resolveTokenHex` | Resolve `var(--accent)` to its actual theme hex so the color wheel shows the right color | ✅ Done |
+| `App.jsx` → `getThemeColor()` | Guard added: `if (String(val).startsWith('var(--')) return val;` | ✅ Done |
+
+No changes needed to export, canvas render, theme switching, or component defaults.
+
+---
+
+## Interaction & Animation System
+
+**Status:** Planned — design token color system complete, this is next  
+**Motivation:** Animations like the TUIFY badge (typewriter, hover expand, text cycle) are currently hardcoded in export templates. The builder should let any user configure these behaviors on any element without writing code.
+
+### Three-layer architecture
+
+**Layer 1 — Visual States** (first to build)
+
+An "Interactions" tab in the Inspector. The user selects a state (`hover`, `active`, `focus`) and modifies properties — the builder stores the delta and generates CSS transitions automatically.
+
+```json
+{
+  "states": {
+    "hover": { "bgColor": "var(--accent)", "textColor": "var(--bg)", "transform": "translateY(-2px)" }
+  }
+}
+```
+
+Generated output:
+```css
+#el-abc { transition: background 0.2s, color 0.2s, transform 0.2s; }
+#el-abc:hover { background: var(--accent); color: var(--bg); transform: translateY(-2px); }
+```
+
+**Layer 2 — Trigger + Effect library** (main milestone)
+
+A curated library of named effects, each parametrizable:
+
+| Effect | Parameters | Generated output |
+|---|---|---|
+| `Typewriter` | target text, char delay, start delay | CSS `@keyframes` with per-letter spans + staggered delays |
+| `FadeIn` | duration, delay, direction | CSS `opacity` + `transform` keyframe |
+| `Expand` | axis, duration | CSS `max-height`/`max-width` transition |
+| `TextCycle` | words[], interval | CSS animation with staggered `font-weight` cycling |
+| `Pulse` | scale, duration | CSS `transform: scale()` keyframe |
+| `CountUp` | from, to, duration | JS requestAnimationFrame counter |
+| `Parallax` | speed | JS scroll listener |
+
+Each interaction is serialized in the project JSON:
+
+```json
+{
+  "interactions": [
+    { "trigger": "load", "effect": "typewriter", "target": "self", "params": { "delay": 500, "charDelay": 180 } },
+    { "trigger": "hover:parent", "effect": "expand", "target": ".label", "params": { "duration": 220 } },
+    { "trigger": "hover:parent", "effect": "textCycle", "target": ".words", "params": { "interval": 1000 } }
+  ]
+}
+```
+
+**Layer 3 — Visual keyframe timeline** (future / advanced)
+
+Full CSS animation timeline editor (After Effects-style). High complexity, deferred.
+
+### TUIFY badge mapped to Layer 2
+
+```
+Badge container
+  Effect: load → Typewriter on "TUIFY" letters (charDelay: 180ms)
+  State: hover → padding expand + background invert
+
+".app" span
+  State: parent:hover → max-width expand (0 → 60px)
+
+Label words
+  Effect: always → TextCycle (interval: 1000ms, stagger: -1s per word)
+```
+
+### Implementation order
+
+1. ✅ Design token color system (complete — colors can now bind to theme vars)
+2. Layer 1: Visual states (hover/active) — Inspector tab, CSS transition generation
+3. Layer 2: Effect library — 5 core effects (Typewriter, FadeIn, Expand, TextCycle, Pulse)
+4. Export integration — serialize interactions → CSS/JS in `buildPageHtml` + `generateGameHtml`
+5. Layer 3: Timeline editor (future)
+
+---
+
 ## Summary (updated)
+
+### Completed as of 2026-05-15
+
+| Area | What's done |
+|---|---|
+| Server | Express API, PostgreSQL (with filesystem fallback), JWT auth, S3/local storage driver |
+| Auth | Login/register, X OAuth, Google OAuth, admin env-var fallback, token blacklist |
+| Storage | S3 driver corrected for PaaS env vars (S3_ENDPOINT / S3_BUCKET / S3_PUBLIC_URL) |
+| Projects | CRUD save/load/delete, multi-user isolation, demo projects |
+| Assets | Upload endpoint, S3 + local driver, multi-sheet sprite frames |
+| Game Builder | Worlds, levels, levelType system, GameEntity placement, GameHUD, RuntimeView |
+| Game Export | Standalone HTML export (`{WorldName}.html`), TUIFY badge in all exports |
+| Game badge | Typewriter letter animation, hover `.app` expand, label word cycling |
+| Publish route | `published_pages` table + publish/unpublish API (`src/server/routes/publish.js`) |
+| Settings | Settings persistence via API (`src/server/routes/settings.js`) |
+| Inspector | Design token color picker (HEX + swatch palette + 5 token swatches) |
+| Toolbox | ScrollH / ScrollV deprecated; GameEmbed + EmbedRuntime added |
+| Selector | Height standardized to match inputs/buttons (5px vertical padding) |
+| Runtime | `vite.runtime.config.js` — standalone runtime build for `public/runtime/` |
+| Contexts | `src/contexts/` scaffolded for shared state |
+
+### Pending (prioritized order)
+
+1. **Phase 3 — Observability** (Prometheus, Grafana, Sentry, rrweb)
+2. **Phase 4 completion** — server-side export pipeline, S3 HTML upload, `/{username}/{slug}` routing
+3. **Interaction & Animation System** — Layer 1 (visual states), Layer 2 (effect library)
+4. **Phase 5** — stats dashboard, platform events
+5. **Phase 6 completion** — `<tuify-game>` Web Component, `/play/` route
+6. **Phase 7 completion** — `exportHTML` GameEmbed→`<tuify-game>`, `/api/games/:id/data`
+7. **Phase 8** — anti-cheat, reward games, server-side RNG
+8. **Phase 9** — player saves, leaderboards
+9. **Phase 10** — multiplayer WebSocket
+10. **Phase 11** — Solana wallet + TUIFY credits
+11. **Phase 12** — Agent API + MCP server / Shadcn bridge
+12. **Phase 13** — LLM integration (NPC dialogue, screen generation)
+13. **Phase 14** — React export + `.tuify.json` standard
+14. **Phase 15** — Tournaments
+15. **Phase 16** — Figma plugin
+16. **Phase 17** — Public gallery, custom domains, sound system, mobile input
+
+---
 
 | Decision | Choice | Reason |
 |---|---|---|

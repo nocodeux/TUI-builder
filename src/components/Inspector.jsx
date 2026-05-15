@@ -1898,6 +1898,16 @@ function Inspector({
   const isTransparentColor = v => v === 'transparent';
   const isTransparentPrefix = v => 'transparent'.startsWith((v || '').toLowerCase());
 
+  const TOKEN_SLOTS = [
+    { key: 'accent',  css: 'var(--accent)',   hex: themeColors.accent  || '#ffff00' },
+    { key: 'text',    css: 'var(--text)',     hex: themeColors.text    || '#00ff00' },
+    { key: 'textDim', css: 'var(--text-dim)', hex: themeColors.textDim || '#008800' },
+    { key: 'bg',      css: 'var(--bg)',       hex: themeColors.bg      || '#000000' },
+    { key: 'border',  css: 'var(--border)',   hex: themeColors.border  || '#00aa00' },
+  ];
+  const isTokenValue = v => typeof v === 'string' && v.startsWith('var(--');
+  const resolveTokenHex = v => TOKEN_SLOTS.find(s => s.css === v)?.hex || '#888888';
+
   const renderColor = (label, field, defValue = '', allowTransparent = false) => {
     let themeDefault = defValue;
     if (!themeDefault) {
@@ -1908,19 +1918,31 @@ function Inspector({
       else themeDefault = themeColors.text || '#00ff00';
     }
 
+    const rawValue = localProps[field] ?? '';
+    const isToken = isTokenValue(rawValue);
+    const tokenName = isToken ? rawValue.replace('var(--', '').replace(')', '') : '';
+    const resolvedHex = isToken ? resolveTokenHex(rawValue) : '';
+
     return (
       <div className="property-group">
         <label>{label}</label>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <input type="text" className="hex-input" placeholder={themeDefault} maxLength={allowTransparent ? 11 : 7}
-            value={localProps[field] ?? ''}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <input
+            type="text"
+            className="hex-input"
+            placeholder={themeDefault}
+            maxLength={isToken ? 10 : (allowTransparent ? 11 : 7)}
+            value={isToken ? tokenName : rawValue}
+            style={isToken ? { opacity: 0.7, fontStyle: 'italic' } : {}}
             onChange={e => {
+              if (isToken) { updateLocal(field, ''); return; }
               const value = e.target.value;
               if (value === '' || /^#[0-9a-fA-F]{0,6}$/.test(value) || (allowTransparent && isTransparentPrefix(value))) {
                 updateLocal(field, value);
               }
             }}
             onBlur={() => {
+              if (isToken) return;
               const value = localProps[field];
               if (value === '' || isHex(value) || (allowTransparent && isTransparentColor(value))) {
                 commitChange(field, value);
@@ -1929,6 +1951,10 @@ function Inspector({
               }
             }}
             onKeyDown={e => {
+              if (isToken) {
+                if (e.key === 'Backspace' || e.key === 'Delete') commitChange(field, '');
+                return;
+              }
               const value = localProps[field];
               if (e.key === 'Enter' && (value === '' || isHex(value) || (allowTransparent && isTransparentColor(value)))) {
                 commitChange(field, value);
@@ -1936,10 +1962,43 @@ function Inspector({
               }
             }}
           />
-          <input type="color" className="color-picker" 
-            value={normalizePickerColor(localProps[field], themeDefault)} 
-            onChange={e => commitChange(field, e.target.value.toLowerCase())} 
+          <input
+            type="color"
+            className="color-picker"
+            value={normalizePickerColor(isToken ? resolvedHex : rawValue, themeDefault)}
+            onChange={e => commitChange(field, e.target.value.toLowerCase())}
           />
+        </div>
+        <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>
+          {TOKEN_SLOTS.map(({ key, css, hex }) => {
+            const isActive = rawValue === css;
+            return (
+              <button
+                key={key}
+                title={`${key} · ${hex}`}
+                onClick={() => commitChange(field, isActive ? '' : css)}
+                style={{
+                  width: 16, height: 16, background: hex,
+                  border: isActive ? '2px solid var(--accent)' : '1px solid var(--border)',
+                  cursor: 'pointer', padding: 0, flexShrink: 0,
+                  outline: 'none', boxSizing: 'border-box',
+                }}
+              />
+            );
+          })}
+          {allowTransparent && (
+            <button
+              title="transparent"
+              onClick={() => commitChange(field, rawValue === 'transparent' ? '' : 'transparent')}
+              style={{
+                width: 16, height: 16,
+                background: 'repeating-conic-gradient(#666 0% 25%, #333 0% 50%) 0 0 / 8px 8px',
+                border: rawValue === 'transparent' ? '2px solid var(--accent)' : '1px solid var(--border)',
+                cursor: 'pointer', padding: 0, flexShrink: 0,
+                outline: 'none', boxSizing: 'border-box',
+              }}
+            />
+          )}
         </div>
       </div>
     );

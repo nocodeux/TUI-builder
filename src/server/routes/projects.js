@@ -207,10 +207,10 @@ projectsRouter.patch('/:id/demo', async (req, res) => {
   const { isDemo, demoOrder } = req.body || {};
   const owner = ownerId(req);
   try {
+    // Admin route — no owner_id filter needed (role already verified above)
     const { rowCount } = await query(
-      `UPDATE projects SET is_demo = $1, demo_order = COALESCE($2, demo_order)
-       WHERE id = $3 AND owner_id = $4`,
-      [Boolean(isDemo), demoOrder ?? null, id, owner]
+      `UPDATE projects SET is_demo = $1, demo_order = COALESCE($2, demo_order) WHERE id = $3`,
+      [Boolean(isDemo), demoOrder ?? null, id]
     );
     if (!rowCount) return res.status(404).json({ error: 'Project not found' });
     res.json({ success: true });

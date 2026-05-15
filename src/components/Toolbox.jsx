@@ -16,8 +16,6 @@ const PALETTE = [
   { kind: 'item', type: 'RadioButton', label: 'RadioButton' },
   { kind: 'item', type: 'Selector', label: 'Selector' },
   { kind: 'item', type: 'ListBox', label: 'ListBox' },
-  { kind: 'item', type: 'HScrollBar', label: 'ScrollH' },
-  { kind: 'item', type: 'VScrollBar', label: 'ScrollV' },
   { kind: 'item', type: 'Timer', label: 'Timer' },
   { kind: 'item', type: 'Shape', label: 'Shape' },
   { kind: 'item', type: 'Line', label: 'Line' },

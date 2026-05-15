@@ -1847,6 +1847,7 @@ function App() {
 
   const getThemeColor = (val, themeVar) => {
     if (!val) return `var(${themeVar})`;
+    if (String(val).startsWith('var(--')) return val;
     const low = String(val).toLowerCase();
     if (low === '#00ff00' || low === '#000000' || low === 'transparent') return `var(${themeVar})`;
     return val;

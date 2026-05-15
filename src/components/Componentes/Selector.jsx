@@ -173,7 +173,7 @@ function Selector({
         onClick={handleToggle}
         style={{
           width: '100%',
-          padding: '3px 8px',
+          padding: '5px 8px',
           background: bg,
           border: `1px solid ${border}`,
           color: text,
