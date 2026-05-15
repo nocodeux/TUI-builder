@@ -97,16 +97,34 @@ function assetType(filename) {
   return ['sprite','tileset','sound','background','image'].includes(prefix) ? prefix : 'image';
 }
 
+const URL_MAP_FILE = path.join(__dirname, '.migrate-urlmap.json');
+
+function saveUrlMap(map) {
+  fs.writeFileSync(URL_MAP_FILE, JSON.stringify(Object.fromEntries(map), null, 2));
+}
+
+function loadUrlMap() {
+  if (!fs.existsSync(URL_MAP_FILE)) return new Map();
+  try {
+    return new Map(Object.entries(JSON.parse(fs.readFileSync(URL_MAP_FILE, 'utf-8'))));
+  } catch { return new Map(); }
+}
+
 function remapUrls(json, urlMap) {
   if (!urlMap.size) return json;
   let s = JSON.stringify(json);
-  for (const [old, next] of urlMap) {
-    s = s.replaceAll(old, next);
-    // Also remap full localhost URLs: http://localhost:PORT/uploads/filename
+  for (const [, newUrl] of urlMap) {
+    // Derive the filename from the S3 url to match any localhost reference to it
+    const filename = newUrl.split('/').pop();
+    // Replace any localhost:PORT/uploads/filename reference
     s = s.replace(
-      new RegExp(`http://localhost:\\d+/uploads/${old.replace('/uploads/','')}`, 'g'),
-      next
+      new RegExp(`http://localhost:\\d+/uploads/${filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'),
+      newUrl
     );
+  }
+  // Also replace by stored key directly (/uploads/filename)
+  for (const [localPath, newUrl] of urlMap) {
+    s = s.replaceAll(localPath, newUrl);
   }
   return JSON.parse(s);
 }
@@ -140,7 +158,9 @@ log('✓ Logged in\n');
 
 // ─── Step 1: upload assets ────────────────────────────────────────────────────
 
-const urlMap = new Map(); // '/uploads/filename' → 'https://s3-url/...'
+// Load previously saved URL map so --projects-only still remaps correctly
+const urlMap = loadUrlMap();
+if (PROJECTS_ONLY && urlMap.size) log(`ℹ Loaded ${urlMap.size} URL mapping(s) from previous asset upload\n`);
 
 if (!PROJECTS_ONLY) {
   const uploadsDir = path.join(ROOT, process.env.STORAGE_PATH || 'uploads');
@@ -173,7 +193,13 @@ if (!PROJECTS_ONLY) {
         failed++;
       }
     }
-    log(`\n  ${ok} uploaded, ${failed} failed\n`);
+    log(`\n  ${ok} uploaded, ${failed} failed`);
+    if (!DRY_RUN && ok > 0) {
+      saveUrlMap(urlMap);
+      log(`  URL map saved to scripts/.migrate-urlmap.json\n`);
+    } else {
+      log('');
+    }
   }
 }
 
