@@ -7,13 +7,14 @@ const getThemeColor = (val, themeVar) => {
   return val;
 };
 
-function Button({ 
-  text = 'Button1', 
-  bgColor = '', 
-  textColor = '', 
-  borderColor = '', 
-  width = 80, 
-  disabled = false, 
+function Button({
+  text = 'Button1',
+  bgColor = '',
+  textColor = '',
+  borderColor = '',
+  width = 80,
+  sizing = {},
+  disabled = false,
   onClick,
   dataSourceType = 'manual',
   dataField = '',
@@ -23,6 +24,12 @@ function Button({
   const data = useContext(DataContext);
   const formContext = useContext(FormContext);
   const fileInputRef = useRef(null);
+
+  const cssWidth = sizing?.widthMode === 'fill' ? '100%'
+    : sizing?.widthMode === 'hug' ? 'fit-content'
+    : (typeof width === 'number' ? `${width}px`
+       : (typeof width === 'string' && width.includes('%')) ? width
+       : 'auto');
   
   const resolvedText = (dataSourceType === 'database' && data && dataField) 
     ? String(data[dataField] || text) 
@@ -64,7 +71,7 @@ function Button({
         disabled={disabled}
         onClick={handleClick}
         style={{
-          width: typeof width === 'string' && width.includes('%') ? width : (width ? `${width}px` : 'auto'),
+          width: cssWidth,
           '--button-bg': bgColor || 'transparent',
           '--button-text': getThemeColor(textColor, '--text'),
           '--button-border': getThemeColor(borderColor, '--text'),

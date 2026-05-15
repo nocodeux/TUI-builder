@@ -77,9 +77,11 @@ function Image({
   const bThick = borderThickness !== undefined ? borderThickness : 1;
   const bColor = getThemeColor(borderColor, '--border');
 
+  const resolvedW = (typeof width === 'number' && width > 0) ? width : (typeof width === 'string' && width !== 'auto' ? parseInt(width, 10) || 80 : 80);
+  const resolvedH = (typeof height === 'number' && height > 0) ? height : (typeof height === 'string' && height !== 'auto' ? parseInt(height, 10) || 80 : 80);
   const containerStyle = {
-    width: sizing.widthMode === 'fill' ? '100%' : (isWidthHug ? 'auto' : `${width}px`),
-    height: sizing.heightMode === 'fill' ? '100%' : (isHeightHug ? 'auto' : `${height}px`),
+    width: sizing.widthMode === 'fill' ? '100%' : (isWidthHug ? 'auto' : `${resolvedW}px`),
+    height: sizing.heightMode === 'fill' ? '100%' : (isHeightHug ? 'auto' : `${resolvedH}px`),
     border: bThick > 0 ? `${bThick}px solid ${bColor}` : 'none',
     display: 'flex',
     alignItems: 'center',
@@ -102,16 +104,8 @@ function Image({
 
   // Si hay iconSrc (de la librería interna), lo priorizamos
   if (iconSrc) {
-    // Better way: convert SVG to DataURI and use mask-image
-    // This ensures only the opaque parts of the SVG are colored
-    const svgData = iconSrc
-      .replace(/"/g, "'")
-      .replace(/#/g, '%23')
-      .replace(/[\n\r]/g, '')
-      .replace(/\s+/g, ' ');
-    
-    const dataUri = `data:image/svg+xml,${svgData}`;
-
+    const b64 = btoa(unescape(encodeURIComponent(iconSrc)));
+    const dataUri = `data:image/svg+xml;base64,${b64}`;
     return (
       <div style={containerStyle}>
         <div style={{
@@ -120,9 +114,11 @@ function Image({
           maskImage: `url("${dataUri}")`,
           maskRepeat: 'no-repeat',
           maskPosition: 'center',
+          maskSize: 'contain',
           WebkitMaskImage: `url("${dataUri}")`,
           WebkitMaskRepeat: 'no-repeat',
           WebkitMaskPosition: 'center',
+          WebkitMaskSize: 'contain',
         }} />
       </div>
     );

@@ -10,7 +10,7 @@
  * 5. Between-row drop zones for creating new rows
  */
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDrop, useDrag } from 'react-dnd';
 import Window from './Componentes/Window';
 import Frame from './Componentes/Frame';
@@ -21,6 +21,7 @@ import Row from './Componentes/Row';
 import CheckBox from './Componentes/CheckBox';
 import RadioButton from './Componentes/RadioButton';
 import ComboBox from './Componentes/ComboBox';
+import Selector from './Componentes/Selector';
 import ListBox from './Componentes/ListBox';
 import Data from './Componentes/Data';
 import Timer from './Componentes/Timer';
@@ -34,11 +35,13 @@ import Tabs from './Componentes/Tabs';
 import Overlay from './Componentes/Overlay';
 import DataRepeater from './Componentes/DataRepeater';
 import Form from './Componentes/Form';
+import GameEmbed from './Componentes/GameEmbed';
 
 const componentMap = {
   Window, Frame, Row, Button, Text, Label: Text, Input: TextBox, TextBox, CheckBox, RadioButton,
-  ComboBox, ListBox, Timer, Shape, Line, Image: ImageComp,
-  HScrollBar: ScrollBar, VScrollBar: ScrollBar, Data, Table, Loader, Tabs, Overlay, DataRepeater, Form
+  ComboBox, Selector, ListBox, Timer, Shape, Line, Image: ImageComp,
+  HScrollBar: ScrollBar, VScrollBar: ScrollBar, Data, Table, Loader, Tabs, Overlay, DataRepeater, Form,
+  GameEmbed,
 };
 
 const CONTAINER_TYPES = ['Window', 'Frame', 'Row', 'Tabs', 'DataRepeater', 'Form'];
@@ -46,11 +49,13 @@ const CONTAINER_TYPES = ['Window', 'Frame', 'Row', 'Tabs', 'DataRepeater', 'Form
 // ─── Draggable component with position-aware drop detection ─────────────────
 function DraggableComponent({
   comp, rowId, topRowId, index, totalSiblings, selectedIds, onSelect, onDelete, onDuplicate,
-  onAddComponent, activeWindow, onMoveComponent, rowDirection, onNavigate, onUpdateComponent, database, onSaveRecord
+  onAddComponent, activeWindow, onMoveComponent, rowDirection, onNavigate, onUpdateComponent, database, onSaveRecord,
+  editingTextId, onStartTextEdit, onCommitTextEdit,
 }) {
   const currentTopRowId = topRowId || rowId;
   const ref = useRef(null);
   const [dropIndicator, setDropIndicator] = useState(null); // 'before' | 'after' | null
+  const isEditingText = comp.type === 'Text' && editingTextId === comp.id;
 
   const [{ isDragging }, drag] = useDrag(() => ({
     type: 'EXISTING_COMPONENT',
@@ -66,9 +71,10 @@ function DraggableComponent({
         height: rect?.height || 32,
       };
     },
+    canDrag: !isEditingText,
     collect: monitor => ({ isDragging: !!monitor.isDragging() }),
     end: () => setDropIndicator(null),
-  }), [comp.id, rowId, index, onMoveComponent]);
+  }), [comp.id, rowId, index, onMoveComponent, isEditingText]);
 
   // This component is also a drop target — detects cursor position
   const [{ isOver }, drop] = useDrop(() => ({
@@ -205,6 +211,9 @@ function DraggableComponent({
           rowDirection={comp.props?.layout?.direction || 'row'}
           onNavigate={onNavigate}
           onUpdateComponent={onUpdateComponent}
+          editingTextId={editingTextId}
+          onStartTextEdit={onStartTextEdit}
+          onCommitTextEdit={onCommitTextEdit}
         />
     ));
   };
@@ -219,21 +228,28 @@ function DraggableComponent({
 
   if (isWidthFill) {
     sizingStyle.flexGrow = 1;
-    sizingStyle.flexBasis = '0%';
+    sizingStyle.flexShrink = 1;
+    // Use flex-basis 0 (not 0%) so children's width:100% resolves against the
+    // computed (post-grow) width rather than the zero percentage baseline.
+    sizingStyle.flexBasis = 0;
     sizingStyle.minWidth = 0;
-    // Only stretch vertically if NOT in a row-direction layout (where it would force height)
-    // or if height is also fill.
     if (rowDirection === 'column' || isHeightFill) {
       sizingStyle.alignSelf = 'stretch';
     }
-  } else if (sizing?.widthMode === 'hug') {
+  } else if (isWidthHug) {
     sizingStyle.flexShrink = 0;
+    // Allow the wrapper to grow beyond the row's own width so hug-content
+    // items (especially buttons with long text) are never capped by a
+    // parent max-width constraint.
+    sizingStyle.maxWidth = 'none';
+    sizingStyle.overflow = 'visible';
   }
 
   if (isHeightFill) {
     sizingStyle.alignSelf = 'stretch';
     sizingStyle.flexGrow = 1;
     sizingStyle.minHeight = 0;
+    sizingStyle.flexDirection = 'column'; // so the child component can use height:100%
   }
 
   // Calculate padding based on drop indicator to create the "gap"
@@ -261,7 +277,9 @@ function DraggableComponent({
         position: 'relative',
         opacity: isDragging ? 0.3 : 1,
         cursor: isDragging ? 'grabbing' : 'grab',
-        display: (isWidthFill || isHeightFill) ? 'flex' : 'inline-flex',
+        // block when only width-fill so child width:100% resolves in a block context;
+        // flex when height-fill (needs flex-direction:column for height:100% child).
+        display: isHeightFill ? 'flex' : isWidthFill ? 'block' : 'inline-flex',
         transition: 'padding 0.15s ease-out', // Smooth transition for the gap
         ...sizingStyle,
         ...wrapperPadding,
@@ -269,12 +287,19 @@ function DraggableComponent({
         outlineOffset: '2px',
         zIndex: isSelected ? 10 : 1,
       }}
-      onClick={e => { 
-        e.stopPropagation(); 
+      onClick={e => {
+        e.stopPropagation();
         if ((e.ctrlKey || e.metaKey) && onNavigate) {
             onNavigate(comp);
         } else {
-            onSelect(comp.id, e.shiftKey); 
+            onSelect(comp.id, e.shiftKey);
+        }
+      }}
+      onDoubleClick={e => {
+        if (comp.type === 'Text' && onStartTextEdit) {
+          e.stopPropagation();
+          onSelect(comp.id);
+          onStartTextEdit(comp.id);
         }
       }}
     >
@@ -337,22 +362,20 @@ function DraggableComponent({
         {...comp.props}
         id={comp.id}
         selected={selectedIds && selectedIds.includes(comp.id)}
-        // Pass override sizing to the component
-        width={isWidthFill ? '100%' : (isWidthHug ? 'auto' : (comp.props.width || 'auto'))}
-        height={isHeightFill ? '100%' : (isHeightHug ? 'auto' : (comp.props.height || 'auto'))}
+        width={isWidthFill ? '100%' : (isWidthHug ? 'auto' : (comp.props.width != null && comp.props.width !== '' ? comp.props.width : 'auto'))}
+        height={isHeightFill ? '100%' : (isHeightHug ? 'auto' : (comp.props.height != null && comp.props.height !== '' ? comp.props.height : 'auto'))}
         database={database}
         onSaveRecord={onSaveRecord}
-        // If Table and bound to database, override rows
-        rows={comp.type === 'Table' && comp.props.dataSourceType === 'database' && comp.props.dataSource && database?.data?.[comp.props.dataSource] 
-              ? database.data[comp.props.dataSource] 
+        rows={comp.type === 'Table' && comp.props.dataSourceType === 'database' && comp.props.dataSource && database?.data?.[comp.props.dataSource]
+              ? database.data[comp.props.dataSource]
               : comp.props.rows}
         onAddChild={isContainer ? (type, extra) => onAddComponent(type, currentTopRowId, childCount, comp.id, extra) : undefined}
         onMoveChild={isContainer ? item => onMoveComponent(item, currentTopRowId, childCount, null, comp.id) : undefined}
         onNavigate={onNavigate}
         onUpdate={(props) => onUpdateComponent(comp.id, props)}
-        onSaveRecord={onSaveRecord}
-        database={database}
         tableName={comp.props.tableName}
+        isEditing={isEditingText}
+        onCommitText={(text) => onCommitTextEdit && onCommitTextEdit(comp.id, text)}
       >
         {isContainer && renderContainerChildren()}
       </Component>
@@ -363,7 +386,8 @@ function DraggableComponent({
 // ─── Row of layout (with position-aware drop on empty area) ─────────────────
 function LayoutRow({
   row, rowIndex, selectedIds, onSelect, onDelete, onDuplicate,
-  onAddComponent, activeWindow, onMoveComponent, onDropToRow, onSelectRow, onNavigate, onUpdateComponent, database, onSaveRecord
+  onAddComponent, activeWindow, onMoveComponent, onDropToRow, onSelectRow, onNavigate, onUpdateComponent, database, onSaveRecord,
+  editingTextId, onStartTextEdit, onCommitTextEdit,
 }) {
   const layout = row.layout || { direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false };
   const rowRef = useRef(null);
@@ -448,8 +472,11 @@ function LayoutRow({
         justifyContent: layout.justify,
         flexWrap: layout.wrap ? 'wrap' : 'nowrap',
         width: row.props?.sizing?.widthMode === 'hug' ? 'fit-content' : '100%',
-        height: row.props?.sizing?.heightMode === 'hug' ? 'auto' : (row.props?.sizing?.heightMode === 'fill' ? '100%' : 'auto'),
-        minHeight: 32,
+        // Use flex:1 (not height:100%) so fill works inside a flex-column parent.
+        ...(row.props?.sizing?.heightMode === 'fill'
+          ? { flex: '1 1 0', minHeight: 0 }
+          : { minHeight: 32 }),
+        height: row.props?.sizing?.heightMode === 'hug' ? 'auto' : undefined,
         ...padding,
         border: isRowSelected ? '1px dashed var(--accent)' : '1px dashed transparent',
         borderRadius: 2,
@@ -492,6 +519,9 @@ function LayoutRow({
           onUpdateComponent={onUpdateComponent}
           onSaveRecord={onSaveRecord}
           database={database}
+          editingTextId={editingTextId}
+          onStartTextEdit={onStartTextEdit}
+          onCommitTextEdit={onCommitTextEdit}
         />
       ))}
 
@@ -548,7 +578,8 @@ function NewRowDropZone({ onDropNewRow, afterIndex }) {
 // ─── Main Canvas ────────────────────────────────────────────────────────────
 function Canvas({
   rows, selectedIds, onSelect, onDelete, onDuplicate, viewMode, onAddToRow, onAddNewRow,
-  onMoveComponent, onSelectRow, activeWindow, canvasPadding, database, onNavigate, onUpdateComponent, onSaveRecord
+  onMoveComponent, onSelectRow, activeWindow, canvasPadding, database, onNavigate, onUpdateComponent, onSaveRecord,
+  editingTextId, onStartTextEdit, onCommitTextEdit,
 }) {
   // Drop on empty canvas → new row
   const [{ isOver }, drop] = useDrop(() => ({
@@ -621,6 +652,9 @@ function Canvas({
                 onUpdateComponent={onUpdateComponent}
                 onSaveRecord={onSaveRecord}
                 database={database}
+                editingTextId={editingTextId}
+                onStartTextEdit={onStartTextEdit}
+                onCommitTextEdit={onCommitTextEdit}
               />
 
             {/* Between-row drop zone (after each row) */}

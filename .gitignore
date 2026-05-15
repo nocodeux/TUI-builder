@@ -87,7 +87,13 @@ PRD.md
 *.db-journal
 *.sqlite-journal
 projects
-docs
+
+# --- STORAGE ---
+uploads/
+
+# --- PROJECT BACKUPS (migration artifacts) ---
+projects_backup_*/
+scripts/.migrate-urlmap.json
 
 # --- GENERATED OUTPUT FILES ---
 # Exported HTML files (these are output, not source code)

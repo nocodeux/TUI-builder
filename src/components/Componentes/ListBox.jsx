@@ -62,8 +62,8 @@ function ListBox({
       value={currentValue}
       onChange={handleChange}
       style={{ 
-        width: typeof width === 'string' && width.includes('%') ? width : `${width}px`, 
-        height: typeof height === 'string' && height.includes('%') ? height : `${height}px`, 
+        width: typeof width === 'string' ? width : `${width}px`,
+        height: typeof height === 'string' ? height : (height ? `${height}px` : 'auto'), 
         borderColor: getThemeColor(borderColor, '--border'), 
         color: getThemeColor(textColor, '--text'), 
         background: getThemeColor(bgColor, '--input-bg') 

@@ -6,9 +6,12 @@ function Window({
   title = 'Window1',
   width = 400,
   height = '',
+  sizing = {},
   bgColor = '',
   textColor = '',
   borderColor = '',
+  bgImage = '',
+  bgImageFit = 'cover',
   layout = { direction: 'row', gap: 8, align: 'flex-start', justify: 'flex-start', wrap: false },
   children,
   onAddChild,
@@ -22,7 +25,35 @@ function Window({
   dataField = ''
 }) {
   const data = useContext(DataContext);
-  
+
+  // Derive CSS dimensions from sizing modes, same pattern as Image.jsx.
+  // Falls back gracefully for components created before sizing was added.
+  const widthMode  = sizing?.widthMode;
+  const heightMode = sizing?.heightMode;
+
+  const cssWidth = widthMode === 'fill' ? '100%'
+    : widthMode === 'hug' ? 'fit-content'
+    : (typeof width === 'number' ? `${width}px`
+       : (typeof width === 'string' && width.includes('%')) ? width
+       : 'auto');
+
+  // For fixed or fill modes the content area should use flex: 1 1 0 so it
+  // fills the Window's definite height. For hug mode (height: auto parent)
+  // flex-basis: 0 + min-height: 0 from the CSS class collapses the content
+  // to 0 because there is no free space to distribute. Override to
+  // flex: 0 0 auto so the content simply sizes to its children.
+  const isHeightConstrained = heightMode === 'fill'
+    || (heightMode === 'fixed' && typeof height === 'number' && height > 0)
+    || (heightMode === 'fixed' && typeof height === 'string' && height.includes('%'))
+    || (!heightMode && typeof height === 'number' && height > 0);
+  const contentFlex = isHeightConstrained ? '1 1 0' : '0 0 auto';
+
+  const cssHeight = heightMode === 'fill' ? '100%'
+    : (!heightMode && typeof height === 'number' && height > 0) ? `${height}px`
+    : (heightMode === 'fixed' && typeof height === 'number' && height > 0) ? `${height}px`
+    : (heightMode === 'fixed' && typeof height === 'string' && height.includes('%')) ? height
+    : 'auto';
+
   const resolvedTitle = (dataSourceType === 'database' && data && dataField)
     ? String(data[dataField] ?? title)
     : title;
@@ -49,11 +80,20 @@ function Window({
       ref={drop}
       className="retro-window"
       style={{
-        width: typeof width === 'string' && width.includes('%') ? width : `${width}px`,
-        minHeight: height ? (typeof height === 'string' && height.includes('%') ? height : `${height}px`) : '',
-        height: height ? (typeof height === 'string' && height.includes('%') ? height : `${height}px`) : 'auto',
+        width: cssWidth,
+        height: cssHeight,
         background: bgColor || 'var(--bg)',
         borderColor: borderColor || 'var(--border)',
+        // bgImage uses the same data-URL / URL shape as the Image component's
+        // `src`. bgImageFit follows CSS background-size keywords: cover,
+        // contain, fill (stretch) or tile (repeat). Falls back to nothing
+        // when bgImage is empty, preserving existing visual.
+        ...(bgImage ? {
+          backgroundImage: `url(${bgImage})`,
+          backgroundSize: bgImageFit === 'tile' ? 'auto' : (bgImageFit === 'fill' ? '100% 100%' : bgImageFit),
+          backgroundRepeat: bgImageFit === 'tile' ? 'repeat' : 'no-repeat',
+          backgroundPosition: 'center',
+        } : {}),
       }}
     >
       <div className="retro-window-titlebar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -94,6 +134,7 @@ function Window({
           outlineOffset: -4,
           transition: 'outline 0.1s',
           minHeight: 40,
+          flex: contentFlex,
         }}
       >
         {children}

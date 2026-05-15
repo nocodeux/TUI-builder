@@ -209,8 +209,10 @@ body {
 }
 
 .preview-area {
+  height: 100%;
   min-height: 100%;
   padding: 20px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -343,8 +345,10 @@ body {
   pointer-events: none;
 }
 
+/* Don't cap children — hug-content wrappers need to grow beyond their initial
+   flex-allocated width to fit long text, and fill wrappers use width:100%. */
 .component-wrapper > * {
-  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -630,6 +634,8 @@ body {
   border: 2px solid var(--border);
   background: var(--bg);
   margin: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .retro-window-titlebar {
@@ -652,7 +658,8 @@ body {
   align-items: flex-start;
   gap: 8px;
   padding: 12px;
-  min-height: 40px;
+  flex: 1 1 0;
+  min-height: 0;
   border-bottom: 1px dashed transparent;
   transition: border-color 0.2s;
 }
@@ -681,12 +688,22 @@ body {
 
 .retro-select,
 .retro-listbox {
-  background: #000;
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: var(--input-bg, var(--bg));
+  background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjUiIHZpZXdCb3g9IjAgMCA4IDUiPjxwYXRoIGZpbGw9IiM4ODg4ODgiIGQ9Ik0wIDBsNCA1IDQtNXoiLz48L3N2Zz4=");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 8px 5px;
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 4px;
+  padding: 3px 22px 3px 6px;
   font-family: monospace;
+  font-size: 11px;
+  cursor: pointer;
+  box-sizing: border-box;
 }
+
 
 .retro-picturebox {
   display: inline-flex;
@@ -900,6 +917,77 @@ body {
   color: var(--bg);
 }
 
+.oauth-btn {
+  font-size: 15px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+  font-family: monospace;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.oauth-btn:hover {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+/* Publish modal — mode selector buttons */
+.publish-mode-btn {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: monospace;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+.publish-mode-btn:hover {
+  background: var(--selected);
+  color: var(--text);
+}
+.publish-mode-btn.active {
+  background: var(--selected);
+  color: var(--text);
+}
+
+/* Publish modal — small list action buttons */
+.retro-mini-btn {
+  font-size: 10px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: monospace;
+  flex-shrink: 0;
+  text-decoration: none;
+  display: inline-block;
+}
+.retro-mini-btn:hover {
+  background: var(--text-dim);
+  color: var(--bg);
+  border-color: var(--text-dim);
+}
+.retro-mini-btn.accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.retro-mini-btn.accent:hover {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
 /* User Journey Panel */
 .user-journey-toggle {
   position: absolute;
@@ -1093,6 +1181,22 @@ body {
   color: #000;
 }
 
+.upload-file-label {
+  margin: 0;
+  font-size: 9px;
+  font-family: monospace;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  background: rgba(255,255,255,0.05);
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.upload-file-label:hover {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    DATABASE PANEL
    ═══════════════════════════════════════════════════════════════ */
@@ -1209,9 +1313,24 @@ body {
    ═══════════════════════════════════════════════════════════════ */
 
 input,
-textarea {
+textarea,
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+input[type="url"],
+input[type="tel"] {
   caret-shape: block;
   caret-color: var(--accent);
+}
+
+/* Modal inputs — retro focus, remove browser chrome */
+.projects-modal input:focus,
+.projects-modal textarea:focus {
+  outline: none;
+  border-color: var(--accent) !important;
+  background: rgba(255, 255, 0, 0.02);
 }
 
 /* Remove number arrows */

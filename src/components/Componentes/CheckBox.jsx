@@ -7,9 +7,28 @@ const getThemeColor = (val, themeVar) => {
   return val;
 };
 
-function CheckBox({ 
-  text = 'CheckBox1', 
-  checked = false, 
+function RetroCheckbox({ checked, onChange, disabled }) {
+  return (
+    <span
+      onClick={disabled ? undefined : onChange}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 14, height: 14, flexShrink: 0,
+        border: `1px solid ${checked ? 'var(--accent)' : 'var(--border)'}`,
+        background: checked ? 'var(--accent)' : 'var(--bg)',
+        cursor: disabled ? 'default' : 'pointer',
+        fontFamily: 'monospace', fontSize: 10, lineHeight: 1,
+        color: checked ? 'var(--bg)' : 'transparent',
+        userSelect: 'none',
+        boxSizing: 'border-box',
+      }}
+    >✓</span>
+  );
+}
+
+function CheckBox({
+  text = 'CheckBox1',
+  checked = false,
   textColor = '',
   dataField = '',
   dataSourceType = 'manual'
@@ -19,9 +38,9 @@ function CheckBox({
 
   const resolveTemplates = (txt, dataSource) => {
     if (!txt || !dataSource) return txt;
-    return txt.replace(/\{\{(.*?)\}\}/g, (match, field) => {
-      const trimmedField = field.trim();
-      return dataSource[trimmedField] !== undefined ? String(dataSource[trimmedField]) : match;
+    return txt.replace(/\{\{(.*?)\}\}/g, (_, field) => {
+      const f = field.trim();
+      return dataSource[f] !== undefined ? String(dataSource[f]) : `{{${f}}}`;
     });
   };
 
@@ -29,29 +48,27 @@ function CheckBox({
     ? resolveTemplates(text, data)
     : text;
 
-  const isChecked = (formContext && dataField) 
-    ? !!formContext.formData[dataField] 
+  const isChecked = (formContext && dataField)
+    ? !!formContext.formData[dataField]
     : checked;
 
-  const handleChange = (e) => {
+  const handleToggle = () => {
     if (formContext && dataField) {
-      formContext.updateField(dataField, e.target.checked);
+      formContext.updateField(dataField, !formContext.formData[dataField]);
     }
   };
 
+  const disabled = !formContext || !dataField;
+
   return (
-    <label className="retro-checkbox" style={{ color: getThemeColor(textColor, '--text'), display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-      <input 
-        type="checkbox" 
-        checked={isChecked} 
-        onChange={handleChange}
-        disabled={!formContext || !dataField}
-      />
+    <label
+      className="retro-checkbox"
+      style={{ color: getThemeColor(textColor, '--text'), display: 'inline-flex', alignItems: 'center', gap: 6, cursor: disabled ? 'default' : 'pointer' }}
+    >
+      <RetroCheckbox checked={isChecked} onChange={handleToggle} disabled={disabled} />
       <span>{resolvedText}</span>
     </label>
   );
 }
 
-
 export default CheckBox;
-
