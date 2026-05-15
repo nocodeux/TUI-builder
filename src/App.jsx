@@ -2519,6 +2519,121 @@ body {
 .export-wrapper > * { max-width: 100%; }
 .export-wrapper { padding: 0 !important; border: none !important; outline: none !important; }
 .drop-zone, .new-row-drop, .drop-indicator { display: none !important; }
+/* ── TUIFY badge ── */
+.tuify-badge {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  padding: 8px 14px;
+  background: rgba(0,0,0,0.82);
+  border: 1px solid ${t.accent};
+  color: ${t.text};
+  text-decoration: none;
+  font-family: monospace;
+  z-index: 99999;
+  cursor: pointer;
+  transition: background 0.22s, box-shadow 0.22s, transform 0.22s, padding 0.22s;
+  box-shadow: 0 0 8px ${t.accent}33;
+  overflow: hidden;
+}
+.tuify-badge::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid ${t.accent};
+  opacity: 0;
+  transition: opacity 0.22s;
+  transform: translate(3px, 3px);
+  pointer-events: none;
+}
+.tuify-badge:hover {
+  background: ${t.accent};
+  box-shadow: 0 0 22px ${t.accent}99, 0 0 50px ${t.accent}44;
+  transform: translateY(-3px);
+  padding: 12px 18px;
+}
+.tuify-badge:hover::before { opacity: 1; }
+.tuify-badge-label {
+  font-size: 8px;
+  color: ${t.textDim || t.text};
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  line-height: 1.5;
+  white-space: nowrap;
+  max-height: 0;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  margin-bottom: 0;
+  transition: max-height 0.22s ease, max-width 0.22s ease, opacity 0.18s ease, margin-bottom 0.22s, color 0.18s;
+}
+.tuify-lbl-1, .tuify-lbl-2, .tuify-lbl-3, .tuify-lbl-4 {
+  animation: tuify-label-bold 4s linear infinite;
+}
+.tuify-lbl-1 { animation-delay: 0s; }
+.tuify-lbl-2 { animation-delay: -3s; }
+.tuify-lbl-3 { animation-delay: -2s; }
+.tuify-lbl-4 { animation-delay: -1s; }
+@keyframes tuify-label-bold {
+  0%, 24.9% { font-weight: bold; }
+  25%, 100% { font-weight: normal; }
+}
+.tuify-badge:hover .tuify-badge-label {
+  max-height: 24px;
+  max-width: 500px;
+  opacity: 1;
+  margin-bottom: 6px;
+  color: ${t.bg};
+}
+.tuify-badge-brand {
+  font-size: 15px;
+  font-weight: bold;
+  color: ${t.accent};
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.18s;
+}
+.tuify-word { display: flex; align-items: center; }
+.tuify-l {
+  max-width: 0;
+  overflow: hidden;
+  display: inline-block;
+  animation: tuify-appear 0.01s step-end forwards;
+}
+.tuify-l1 { animation-delay: 0.5s; }
+.tuify-l2 { animation-delay: 0.68s; }
+.tuify-l3 { animation-delay: 0.86s; }
+.tuify-l4 { animation-delay: 1.04s; }
+.tuify-l5 { animation-delay: 1.22s; }
+@keyframes tuify-appear { to { max-width: 20px; margin-right: 2px; } }
+.tuify-domain {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  display: inline-block;
+  transition: max-width 0.22s ease;
+}
+.tuify-badge:hover .tuify-domain { max-width: 60px; }
+.tuify-badge-cursor {
+  display: inline-block;
+  width: 9px;
+  height: 15px;
+  background: ${t.accent};
+  animation: tuify-blink 1s step-end infinite;
+  transition: background 0.18s;
+  flex-shrink: 0;
+}
+@keyframes tuify-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.tuify-badge:hover .tuify-badge-brand { color: ${t.bg}; }
+.tuify-badge:hover .tuify-badge-cursor { background: ${t.bg}; }
 .retro-select, .retro-listbox {
   -webkit-appearance: none !important;
   appearance: none !important;
@@ -2682,6 +2797,11 @@ ${(() => {
   }).filter(Boolean).join(',\n  ');
   return `  <script>window.__TUIFY_EMBEDS__=[${embedData}];</script>\n  <script src="/runtime/tuify-game.js"></script>`;
 })()}
+
+  <a href="https://tuify.app" target="_blank" rel="noopener noreferrer" class="tuify-badge">
+    <span class="tuify-badge-label"><span class="tuify-lbl-1">Designed</span> &middot; <span class="tuify-lbl-2">Built</span> &middot; <span class="tuify-lbl-3">Deployed</span> &middot; <span class="tuify-lbl-4">Maintained with</span></span>
+    <span class="tuify-badge-brand"><span class="tuify-word"><span class="tuify-l tuify-l1">T</span><span class="tuify-l tuify-l2">U</span><span class="tuify-l tuify-l3">I</span><span class="tuify-l tuify-l4">F</span><span class="tuify-l tuify-l5">Y</span><span class="tuify-domain">.app</span></span><span class="tuify-badge-cursor"></span></span>
+  </a>
 </body>
 </html>`;
 

@@ -2,5 +2,9 @@ import { localDriver } from './localDriver.js';
 import { s3Driver } from './s3Driver.js';
 
 export function getStorageDriver() {
-  return (process.env.STORAGE_DRIVER || 'local') === 's3' ? s3Driver : localDriver;
+  // Auto-activate S3 when a custom endpoint is injected (PaaS / MinIO), or via explicit flag.
+  const useS3 = process.env.STORAGE_DRIVER === 's3'
+    || !!process.env.STORAGE_ENDPOINT
+    || !!process.env.AWS_ENDPOINT_URL;
+  return useS3 ? s3Driver : localDriver;
 }

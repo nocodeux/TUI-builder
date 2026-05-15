@@ -237,6 +237,14 @@ authRouter.post('/login', authLimiter, async (req, res) => {
     if (user && !user.password_hash) {
       return res.status(401).json({ error: 'This account uses social login — use X or Google to sign in' });
     }
+    // User not in DB — still allow env var admin credentials as a fallback
+    if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+      const emailOk = safeCompare(email, process.env.ADMIN_EMAIL);
+      const passOk  = safeCompare(password, process.env.ADMIN_PASSWORD);
+      if (emailOk && passOk) {
+        return res.json({ token: sign({ email, role: 'admin' }), email, role: 'admin' });
+      }
+    }
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
