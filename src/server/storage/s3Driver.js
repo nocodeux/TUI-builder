@@ -31,9 +31,12 @@ export const s3Driver = {
       Body: buffer,
       ContentType: mimeType,
     }));
-    // S3_PUBLIC_URL is the public-facing base URL provided by the PaaS
+    // Public URL: S3_PUBLIC_URL (PaaS CDN) → endpoint/bucket (MinIO path-style) → AWS virtual-hosted
     const ep = endpoint();
-    const cdnBase = (process.env.S3_PUBLIC_URL || process.env.CDN_BASE_URL || (ep ? `${ep}/${bkt}` : `https://${bkt}.s3.amazonaws.com`)).replace(/\/$/, '');
+    const cdnBase = (
+      process.env.S3_PUBLIC_URL ||
+      (ep ? `${ep}/${bkt}` : `https://${bkt}.s3.amazonaws.com`)
+    ).replace(/\/$/, '');
     return { url: `${cdnBase}/${key}`, key };
   },
 
