@@ -234,10 +234,8 @@ authRouter.post('/login', authLimiter, async (req, res) => {
       await seedDemosForUser(user.id);
       return res.json({ token: userToken(user), ...userPublic(user) });
     }
-    if (user && !user.password_hash) {
-      return res.status(401).json({ error: 'This account uses social login — use X or Google to sign in' });
-    }
-    // User not in DB — still allow env var admin credentials as a fallback
+    // Check env-var admin BEFORE the social-login block — the admin email may be
+    // an OAuth account in DB (no password_hash) but still needs password login to work.
     if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
       const emailOk = safeCompare(email, process.env.ADMIN_EMAIL);
       const passOk  = safeCompare(password, process.env.ADMIN_PASSWORD);
@@ -245,11 +243,15 @@ authRouter.post('/login', authLimiter, async (req, res) => {
         // Upsert into DB so admin gets a real userId (needed for publishing, assets, etc.)
         const adminUser = await upsertUser({ email, displayName: 'Admin', role: 'admin' });
         if (adminUser) {
-          await seedDemosForUser(adminUser.id);
-          return res.json({ token: userToken(adminUser), ...userPublic(adminUser) });
+          await query('UPDATE users SET role = $1, last_login = now() WHERE id = $2', ['admin', adminUser.id]);
+          const { rows: refreshed } = await query('SELECT * FROM users WHERE id = $1', [adminUser.id]);
+          return res.json({ token: userToken(refreshed[0]), ...userPublic(refreshed[0]) });
         }
         return res.json({ token: sign({ email, role: 'admin' }), email, role: 'admin' });
       }
+    }
+    if (user && !user.password_hash) {
+      return res.status(401).json({ error: 'This account uses social login — use X or Google to sign in' });
     }
     return res.status(401).json({ error: 'Invalid credentials' });
   }
