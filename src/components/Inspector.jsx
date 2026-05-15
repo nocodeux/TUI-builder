@@ -994,7 +994,7 @@ function Inspector({
             if (effectiveLock) patch.renderSize.width = Math.max(1, Math.round(h * aspect));
             onUpdateEntity(ent.id, patch);
           };
-          const iconUrl = `/src/img/icons/${effectiveLock ? 'imgi_43_lock' : 'imgi_13_unlock'}.svg`;
+          const iconUrl = `/img/icons/${effectiveLock ? 'imgi_43_lock' : 'imgi_13_unlock'}.svg`;
           return (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 28px 1fr', gap: 4, alignItems: 'end' }}>
               <div className="property-group">
