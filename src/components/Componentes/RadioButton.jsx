@@ -7,10 +7,37 @@ const getThemeColor = (val, themeVar) => {
   return val;
 };
 
-function RadioButton({ 
-  text = 'Option1', 
-  checked = false, 
-  group = 'group1', 
+function RetroRadio({ checked, onChange, disabled }) {
+  return (
+    <span
+      onClick={disabled ? undefined : onChange}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 14, height: 14, flexShrink: 0,
+        border: `1px solid ${checked ? 'var(--accent)' : 'var(--border)'}`,
+        borderRadius: '50%',
+        background: 'var(--bg)',
+        cursor: disabled ? 'default' : 'pointer',
+        userSelect: 'none',
+        boxSizing: 'border-box',
+      }}
+    >
+      {checked && (
+        <span style={{
+          width: 6, height: 6,
+          borderRadius: '50%',
+          background: 'var(--accent)',
+          flexShrink: 0,
+        }} />
+      )}
+    </span>
+  );
+}
+
+function RadioButton({
+  text = 'Option1',
+  checked = false,
+  group = 'group1',
   textColor = '',
   dataField = '',
   dataSourceType = 'manual'
@@ -20,9 +47,9 @@ function RadioButton({
 
   const resolveTemplates = (txt, dataSource) => {
     if (!txt || !dataSource) return txt;
-    return txt.replace(/\{\{(.*?)\}\}/g, (match, field) => {
-      const trimmedField = field.trim();
-      return dataSource[trimmedField] !== undefined ? String(dataSource[trimmedField]) : match;
+    return txt.replace(/\{\{(.*?)\}\}/g, (_, field) => {
+      const f = field.trim();
+      return dataSource[f] !== undefined ? String(dataSource[f]) : `{{${f}}}`;
     });
   };
 
@@ -30,30 +57,27 @@ function RadioButton({
     ? resolveTemplates(text, data)
     : text;
 
-  const isChecked = (formContext && dataField) 
-    ? formContext.formData[dataField] === text 
+  const isChecked = (formContext && dataField)
+    ? formContext.formData[dataField] === text
     : checked;
 
-  const handleChange = (e) => {
+  const handleSelect = () => {
     if (formContext && dataField) {
       formContext.updateField(dataField, text);
     }
   };
 
+  const disabled = !formContext || !dataField;
+
   return (
-    <label className="retro-radio" style={{ color: getThemeColor(textColor, '--text'), display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-      <input 
-        type="radio" 
-        name={group} 
-        checked={isChecked} 
-        onChange={handleChange}
-        disabled={!formContext || !dataField}
-      />
+    <label
+      className="retro-radio"
+      style={{ color: getThemeColor(textColor, '--text'), display: 'inline-flex', alignItems: 'center', gap: 6, cursor: disabled ? 'default' : 'pointer' }}
+    >
+      <RetroRadio checked={isChecked} onChange={handleSelect} disabled={disabled} />
       <span>{resolvedText}</span>
     </label>
   );
 }
 
-
 export default RadioButton;
-

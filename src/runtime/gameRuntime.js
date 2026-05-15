@@ -58,6 +58,7 @@ export class GameRuntime {
       _aiState: 'patrol',
       _spawnX: e.position?.x ?? 0,
       _patrolDir: 1,
+      _patrolFlipCooldown: 0,
       _attackCooldown: 0,
       _attackHitSet: null,
       currentAnim: e.defaultAnimation,
@@ -76,13 +77,15 @@ export class GameRuntime {
     this.running = false;
     this.showColliders = false;
     this.images = new Map(); // assetId → HTMLImageElement | HTMLCanvasElement
-    this.preload();
+    this.preloadPromise = this.preload();
   }
 
   setShowColliders(v) { this.showColliders = v; }
 
+  // Full AABB check against solid (non-one-way) segment shapes only.
   segmentCollide(x, y, w, h) {
     for (const shape of (this.level.colliderShapes || [])) {
+      if (shape.oneWay) continue; // one-way shapes use oneWayBottomCross, not AABB
       const pts = shape.points || [];
       const n = pts.length;
       if (n < 2) continue;
@@ -95,7 +98,39 @@ export class GameRuntime {
     return false;
   }
 
-  // Combined tile + segment check used by _applyPhysics.
+  // One-way landing check: entity bottom was at/above the segment, and the new
+  // position crosses below it. Uses per-segment Y interpolation at the entity's
+  // center X — never fires from a lateral approach (AABB side touching the line).
+  oneWayBottomCross(x, prevY, h, newY, w, onGround = false, maxStepUp = 2) {
+    const prevBottom = prevY + h;
+    const newBottom  = newY  + h;
+    // When already standing on the slope, allow the bottom to be up to maxStepUp
+    // pixels above the segment before we consider it "on top" — this keeps the
+    // entity from falling through an upward-rising diagonal when moving sideways.
+    const stepTol = onGround ? maxStepUp : 2;
+    for (const shape of (this.level.colliderShapes || [])) {
+      if (!shape.oneWay) continue;
+      const pts = shape.points || [];
+      const n = pts.length;
+      if (n < 2) continue;
+      const limit = shape.closed ? n : n - 1;
+      for (let i = 0; i < limit; i++) {
+        const p0 = pts[i], p1 = pts[(i + 1) % n];
+        const sx0 = Math.min(p0.x, p1.x), sx1 = Math.max(p0.x, p1.x);
+        if (sx1 - sx0 < 1) continue; // skip near-vertical segments
+        if (x + w <= sx0 || x >= sx1) continue; // no horizontal overlap
+        // Interpolate segment Y at the entity's horizontal centre (clamped to segment X range)
+        const cx  = Math.max(sx0 + 0.5, Math.min(sx1 - 0.5, x + w / 2));
+        const t   = (cx - p0.x) / (p1.x - p0.x);
+        const segY = p0.y + t * (p1.y - p0.y);
+        // Only land when coming from above: bottom was at/above segY (+ tolerance) and crosses below
+        if (prevBottom <= segY + stepTol && newBottom > segY) return true;
+      }
+    }
+    return false;
+  }
+
+  // Combined tile + segment check used by _applyPhysics (solid shapes only).
   collides(x, y, w, h) {
     return this.tileCollide(x, y, w, h) || this.segmentCollide(x, y, w, h);
   }
@@ -121,11 +156,14 @@ export class GameRuntime {
       const a = (this.assets.backgrounds || []).find(x => x.id === bg.assetId);
       if (a?.src) queue.push([a.id, a.src, null, 0]);
     }
-    for (const [id, src, color, tol] of queue) {
-      loadMaskedImage(src, color, tol).then(entry => {
-        if (entry?.img) this.images.set(id, entry.img);
-      });
-    }
+    if (!queue.length) return Promise.resolve();
+    return Promise.all(
+      queue.map(([id, src, color, tol]) =>
+        loadMaskedImage(src, color, tol).then(entry => {
+          if (entry?.img) this.images.set(id, entry.img);
+        })
+      )
+    );
   }
 
   // ── Multi-sheet animation helpers ─────────────────────────────────────────
@@ -256,11 +294,12 @@ export class GameRuntime {
     const h = entity.renderSize?.height || 32;
     if (cols > 0 && rows > 0) {
       entity.position.x = Math.max(0, Math.min(entity.position.x, cols * tileW - w));
-      entity.position.y = Math.max(0, Math.min(entity.position.y, rows * tileH - h));
+      entity.position.y = Math.min(entity.position.y, rows * tileH - h); // clamp at floor only; top is open
     }
     if (isPlatformer) entity.velocity.y += gravity * dt;
 
     // ── X axis ────────────────────────────────────────────────────────────
+    // segmentCollide already excludes one-way shapes, so no extra flag needed.
     const newX = entity.position.x + entity.velocity.x * dt;
     if (!this.collides(newX, entity.position.y, w, h)) {
       entity.position.x = newX;
@@ -283,16 +322,29 @@ export class GameRuntime {
       }
       if (!climbed) {
         entity.velocity.x = 0;
-        if (entity.role === 'enemy') entity._patrolDir *= -1;
+        if (entity.role === 'enemy' && entity._patrolFlipCooldown <= 0) {
+          entity._patrolDir *= -1;
+          entity._patrolFlipCooldown = 0.25;
+        }
       }
     } else {
       entity.velocity.x = 0;
-      if (entity.role === 'enemy') entity._patrolDir *= -1;
+      if (entity.role === 'enemy' && entity._patrolFlipCooldown <= 0) {
+        entity._patrolDir *= -1;
+        entity._patrolFlipCooldown = 0.25;
+      }
     }
 
     // ── Y axis ────────────────────────────────────────────────────────────
+    // Solid shapes: full AABB check in both directions.
+    // One-way shapes: bottom-crossing test only (never fires from a lateral approach).
+    //   - Moving up: one-way shapes ignored entirely (jump through).
+    //   - Moving down / still: one-way only triggers if entity bottom crosses the line Y.
     const newY = entity.position.y + entity.velocity.y * dt;
-    if (!this.collides(entity.position.x, newY, w, h)) {
+    const solidBlockY = this.collides(entity.position.x, newY, w, h);
+    const oneWayBlockY = !solidBlockY && entity.velocity.y >= 0 &&
+      this.oneWayBottomCross(entity.position.x, entity.position.y, h, newY, w, entity.onGround, Math.ceil(tileH * 0.35));
+    if (!solidBlockY && !oneWayBlockY) {
       entity.position.y = newY;
       if (isPlatformer) {
         entity._airborneFrames = (entity._airborneFrames || 0) + 1;
@@ -513,8 +565,9 @@ export class GameRuntime {
     const patrolRange    = (entity.behavior?.patrolRange    ?? 3) * tileW;
     const isPlatformer   = (this.level.gravity || 0) > 0;
 
-    if (entity._invincibleTime > 0) entity._invincibleTime -= dt;
-    if (entity._attackCooldown  > 0) entity._attackCooldown  -= dt;
+    if (entity._invincibleTime    > 0) entity._invincibleTime    -= dt;
+    if (entity._attackCooldown   > 0) entity._attackCooldown   -= dt;
+    if (entity._patrolFlipCooldown > 0) entity._patrolFlipCooldown -= dt;
 
     // Locked in hurt animation — wait until it expires, then return to patrol.
     if (entity._hitState?.timeLeft > 0) {
@@ -557,11 +610,14 @@ export class GameRuntime {
       // Edge detection — only in platformer mode when the entity is on the ground,
       // and only when the distance check didn't already flip the direction (prevents
       // the two checks fighting each other and causing rapid oscillation).
-      if (!dirFlipped && isPlatformer && entity.onGround) {
+      if (!dirFlipped && isPlatformer && entity.onGround && entity._patrolFlipCooldown <= 0) {
         const w = entity.renderSize?.width  || 32;
         const h = entity.renderSize?.height || 32;
         const footX = entity._patrolDir > 0 ? entity.position.x + w : entity.position.x - 2;
-        if (!this.tileCollide(footX, entity.position.y + h, 2, tileH)) entity._patrolDir *= -1;
+        if (!this.tileCollide(footX, entity.position.y + h, 2, tileH)) {
+          entity._patrolDir *= -1;
+          entity._patrolFlipCooldown = 0.25;
+        }
       }
       entity.velocity.x = entity._patrolDir * speed * 0.5;
       entity.facing = entity._patrolDir > 0 ? 'right' : 'left';
@@ -663,8 +719,9 @@ export class GameRuntime {
     const layer = (tm.layers || []).find(l => l.kind === 'collision') || (tm.layers || [])[0];
     if (!layer) return false;
 
-    if (x < 0 || x + w > cols * tileW) return true;
-    if (y < 0 || y + h > rows * tileH) return true;
+    if (x < 0 || x + w > cols * tileW) return true;   // left/right walls are hard
+    if (y + h > rows * tileH) return true;             // floor is hard
+    // Top is open — entities can jump/move past y=0; camera stays clamped
 
     const c0 = Math.max(0, Math.floor(x / tileW));
     const c1 = Math.min(cols - 1, Math.floor((x + w - 1) / tileW));
@@ -837,23 +894,49 @@ export class GameRuntime {
       ctx.setLineDash([]);
     }
 
-    // Line-based collision shapes — dashed orange polylines.
+    // Line-based collision shapes — orange (solid) or green (one-way).
     ctx.setLineDash([5, 3]);
     ctx.lineWidth = 2;
     for (const shape of (this.level.colliderShapes || [])) {
       const pts = shape.points || [];
       if (pts.length < 2) continue;
-      ctx.strokeStyle = 'rgba(255,165,0,0.9)';
+      const c = shape.oneWay ? 'rgba(80,220,80,0.9)' : 'rgba(255,165,0,0.9)';
+      ctx.strokeStyle = c;
       ctx.beginPath();
       ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
       if (shape.closed) ctx.closePath();
       ctx.stroke();
-      ctx.fillStyle = 'rgba(255,165,0,0.9)';
+      ctx.fillStyle = c;
       for (const p of pts) {
         ctx.beginPath();
         ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
         ctx.fill();
+      }
+      // Draw tick marks on one-way shapes to show the solid side (upward).
+      if (shape.oneWay) {
+        ctx.setLineDash([]);
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const ax = pts[i].x, ay = pts[i].y;
+          const bx = pts[i+1].x, by = pts[i+1].y;
+          const len = Math.hypot(bx-ax, by-ay);
+          if (len < 4) continue;
+          const dx = (bx-ax)/len, dy = (by-ay)/len;
+          const nx = dy < 0 ? dy : -dy;
+          const ny = dy < 0 ? -dx : dx;
+          const count = Math.max(1, Math.floor(len / 24));
+          for (let t = 0; t <= count; t++) {
+            const f = count === 0 ? 0.5 : t / count;
+            const mx = ax + dx*len*f, my = ay + dy*len*f;
+            ctx.beginPath();
+            ctx.moveTo(mx, my);
+            ctx.lineTo(mx + nx*7, my + ny*7);
+            ctx.stroke();
+          }
+        }
+        ctx.setLineDash([5, 3]);
+        ctx.lineWidth = 2;
       }
     }
     ctx.setLineDash([]);

@@ -13,6 +13,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
+import { GameContext } from './contexts/gameContext';
 import Toolbox from './components/Toolbox';
 import Canvas from './components/Canvas';
 import Inspector from './components/Inspector';
@@ -22,6 +23,7 @@ import LevelCanvas from './components/LevelCanvas';
 import RuntimeView from './components/RuntimeView';
 import SpriteSheetManager from './components/SpriteSheetManager';
 import { apiFetch, getToken, setToken, clearToken } from './lib/apiFetch';
+import { uploadAsset } from './lib/assetUpload';
 import './App.css';
 import appCss from './App.css?raw';
 
@@ -63,8 +65,7 @@ function App() {
   const [database, setDatabase] = useState({ tables: [], data: {} });
   const [canvasPadding, setCanvasPadding] = useState({ top: 20, right: 20, bottom: 20, left: 20 });
   const [downloadLink, setDownloadLink] = useState(null);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('nanostudio_api_key') || '');
-  const [apiUrl, setApiUrl] = useState(() => localStorage.getItem('nanostudio_api_url') || '');
+  const [externalApis, setExternalApis] = useState([]);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('New Project');
   const [editingProjectId, setEditingProjectId] = useState(null);
@@ -83,6 +84,10 @@ function App() {
   // Active tile brush. When set, clicks on LevelCanvas paint instead of
   // deselecting. tileValue 0 = eraser; 1+ = tileset cell index + 1.
   const [paintBrush, setPaintBrush] = useState(null);
+  // Currently selected collider shape (highlighted in both canvas and inspector).
+  const [selectedColliderShapeId, setSelectedColliderShapeId] = useState(null);
+  // Currently selected occlusion (mask) shape.
+  const [selectedOcclusionShapeId, setSelectedOcclusionShapeId] = useState(null);
   // True while the runtime is mounted on the level canvas. Toggled by
   // the Play / Stop button on LevelTabs.
   const [isPlaying, setIsPlaying] = useState(false);
@@ -101,8 +106,28 @@ function App() {
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirm, setRegConfirm] = useState('');
+  const [settingsDisplayName, setSettingsDisplayName] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [tokenCopied, setTokenCopied] = useState(false);
+  const [showPublish, setShowPublish] = useState(false);
+  const [publishSlug, setPublishSlug] = useState('');
+  const [publishTitle, setPublishTitle] = useState('');
+  const [publishDesc, setPublishDesc] = useState('');
+  const [publishStatus, setPublishStatus] = useState('idle'); // idle | checking | publishing | done | error
+  const [publishUrl, setPublishUrl] = useState('');
+  const [publishError, setPublishError] = useState('');
+  const [publishedList, setPublishedList] = useState([]);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef(null);
+  const [showThemeMenu, setShowThemeMenu] = useState(false);
+  const themeMenuRef = useRef(null);
+  const [publishMode, setPublishMode] = useState('page'); // 'page' | 'game' | 'page+game'
+  const [publishWorldId, setPublishWorldId] = useState(null);
 
   const isInitialLoading = useRef(true);
+  const projectLoaded = useRef(false);
+  const editsMade = useRef(false);
   const saveTimer = useRef(null);
   const assetsDirty = useRef(false);
   const assetsSaveTimer = useRef(null);
@@ -198,6 +223,206 @@ function App() {
     }
   };
 
+  // Sync editable display name whenever the Settings modal opens
+  useEffect(() => {
+    if (showSettings) setSettingsDisplayName(currentUser?.displayName || '');
+  }, [showSettings, currentUser?.displayName]);
+
+  const handleProfileSave = async () => {
+    setProfileSaving(true);
+    try {
+      const res = await apiFetch('/api/auth/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: settingsDisplayName }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setCurrentUser(prev => ({ ...prev, ...updated }));
+      }
+    } catch (err) {
+      console.error('Profile save error:', err);
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handleAvatarUpload = async (file) => {
+    setAvatarUploading(true);
+    try {
+      const { url } = await uploadAsset(file, 'avatar');
+      const res = await apiFetch('/api/auth/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ avatarUrl: url }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setCurrentUser(prev => ({ ...prev, ...updated }));
+      }
+    } catch (err) {
+      console.error('Avatar upload error:', err);
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const addExternalApi = () => {
+    setExternalApis(prev => [...prev, { id: mkId(), name: '', url: '', authHeader: '', authValue: '' }]);
+  };
+  const updateExternalApi = (id, field, value) => {
+    setExternalApis(prev => prev.map(a => a.id === id ? { ...a, [field]: value } : a));
+  };
+  const removeExternalApi = (id) => {
+    setExternalApis(prev => prev.filter(a => a.id !== id));
+  };
+
+  const fetchPublishedList = async () => {
+    try {
+      const res = await apiFetch('/api/publish/list');
+      if (res.ok) setPublishedList(await res.json());
+    } catch { /* ignore */ }
+  };
+
+  const handleOpenPublish = () => {
+    const pageScreens = screens.filter(s => s.kind !== 'world');
+    const worlds = screens.filter(s => s.kind === 'world');
+    const hasPage = pageScreens.length > 0;
+    const hasGame = worlds.length > 0;
+
+    // Detect if the page already has GameEmbed components — if so, "page+game"
+    // is already handled natively and we just publish the page.
+    const pageEmbeds = pageScreens.flatMap(s =>
+      (s.rows || []).flatMap(r => {
+        const findEmbeds = (comps) => comps.flatMap(c =>
+          c.type === 'GameEmbed' && c.props?.worldId ? [c.props.worldId]
+          : c.children ? findEmbeds(c.children) : []
+        );
+        return findEmbeds(r.children || []);
+      })
+    );
+    const hasGameEmbed = pageEmbeds.length > 0;
+
+    // Mode selection: if game is already embedded in page, treat as page-only publish
+    let mode = 'page';
+    if (hasGameEmbed) {
+      mode = 'page'; // game is embedded — no need for floating overlay
+    } else if (hasPage && hasGame) {
+      mode = 'page+game';
+    } else if (hasGame && !hasPage) {
+      mode = 'game';
+    }
+
+    // Determine which world to publish (embedded world takes priority)
+    const embeddedWorld = pageEmbeds.length > 0
+      ? worlds.find(w => w.id === pageEmbeds[0]) || worlds[0]
+      : worlds[0];
+
+    // Pull title/slug/description from screen/world settings (source of truth)
+    const firstScreen = pageScreens[0];
+    const targetWorld = embeddedWorld || worlds[0];
+
+    let title = '';
+    let slug  = '';
+    let desc  = '';
+
+    if (mode === 'game') {
+      // Game-only: pull from world settings
+      title = targetWorld?.name || currentProject.name || 'Untitled';
+      slug  = targetWorld?.worldSettings?.slug || currentProject.publishSlug || slugify(title);
+      desc  = targetWorld?.worldSettings?.description || currentProject.description || '';
+    } else {
+      // Page or page+game: pull from first screen settings (webTitle → fallback to project name)
+      title = firstScreen?.settings?.webTitle || currentProject.name || 'Untitled';
+      slug  = firstScreen?.settings?.slug || currentProject.publishSlug || slugify(title);
+      desc  = firstScreen?.settings?.description || currentProject.description || '';
+    }
+
+    setPublishMode(mode);
+    setPublishWorldId(targetWorld?.id || null);
+    setPublishTitle(title);
+    setPublishSlug(slug);
+    setPublishDesc(desc);
+    setPublishStatus('idle');
+    setPublishUrl('');
+    setPublishError('');
+    setShowPublish(true);
+    fetchPublishedList();
+  };
+
+  const handlePublish = async () => {
+    setPublishStatus('publishing');
+    setPublishError('');
+    try {
+      const needsPage = publishMode === 'page' || publishMode === 'page+game';
+      const pageHtml = needsPage ? buildPageHtml() : undefined;
+      // Game = all worlds in the project — no worldId selection needed
+      const res = await apiFetch('/api/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceId: currentProject.id,
+          slug: publishSlug,
+          title: publishTitle,
+          description: publishDesc,
+          isPublic: true,
+          publishMode,
+          pageHtml,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setPublishError(data.error || 'Publish failed'); setPublishStatus('error'); return; }
+      setPublishUrl(data.url);
+      setPublishStatus('done');
+      fetchPublishedList();
+    } catch (err) {
+      setPublishError(err.message);
+      setPublishStatus('error');
+    }
+  };
+
+  const handleUnpublish = async (slug) => {
+    try {
+      const res = await apiFetch(`/api/publish/${slug}`, { method: 'DELETE' });
+      if (res.ok) fetchPublishedList();
+    } catch { /* ignore */ }
+  };
+
+  const handleRepublishItem = async (item) => {
+    setPublishStatus('publishing');
+    setPublishError('');
+    try {
+      const mode = item.publish_mode || 'game';
+      const needsPage = mode === 'page' || mode === 'page+game';
+      // Game = all worlds — no worldId needed
+      const res = await apiFetch('/api/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceId: item.source_id,
+          slug: item.slug,
+          title: item.title || '',
+          description: item.description || '',
+          isPublic: item.is_public !== false,
+          publishMode: mode,
+          pageHtml: needsPage ? buildPageHtml() : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setPublishError(data.error || 'Republish failed'); setPublishStatus('error'); return; }
+      setPublishUrl(data.url);
+      setPublishStatus('done');
+      fetchPublishedList();
+    } catch (err) {
+      setPublishError(err.message);
+      setPublishStatus('error');
+    }
+  };
+
+  function slugify(str) {
+    return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64);
+  }
+
   // Wrap setAssets so every mutation flips the dirty flag and schedules a
   // sidecar save. Components should always go through this setter.
   const setAssets = useCallback((updater) => {
@@ -246,14 +471,19 @@ function App() {
   // ── Persistencia ──────────────────────────────────────────────────────────
   const triggerSave = useCallback(() => {
     if (isInitialLoading.current) return;
-    
+    if (!projectLoaded.current) return;
+    if (!editsMade.current) return;
+
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    
+
     setSaveStatus('Saving...');
     saveTimer.current = setTimeout(() => {
+      editsMade.current = false; // reset before async save so new edits re-arm it
       const projectData = {
         id: currentProject.id,
         name: currentProject.name,
+        publishSlug: currentProject.publishSlug,
+        description: currentProject.description,
         theme,
         viewMode,
         screens,
@@ -277,6 +507,7 @@ function App() {
         setTimeout(() => setSaveStatus(''), 1500);
       })
       .catch(err => {
+        editsMade.current = true; // save failed — keep dirty so it retries on next edit
         console.error('[Save] Error saving project:', err);
         setSaveStatus('Save Error');
         setTimeout(() => setSaveStatus(''), 2000);
@@ -333,6 +564,7 @@ function App() {
   }, [historyIndex, isUndoing]);
 
   const updateScreens = useCallback((newScreensOrFn, shouldSaveHistory = true) => {
+    if (!isInitialLoading.current) editsMade.current = true;
     setScreens(prev => {
       const next = typeof newScreensOrFn === 'function' ? newScreensOrFn(prev) : newScreensOrFn;
       if (shouldSaveHistory && !isInitialLoading.current) {
@@ -345,6 +577,7 @@ function App() {
   const undo = useCallback(() => {
     if (historyIndex > 0) {
       setIsUndoing(true);
+      editsMade.current = true;
       const prevScreens = history[historyIndex - 1];
       setScreens(JSON.parse(JSON.stringify(prevScreens)));
       setHistoryIndex(historyIndex - 1);
@@ -355,6 +588,7 @@ function App() {
   const redo = useCallback(() => {
     if (historyIndex < history.length - 1) {
       setIsUndoing(true);
+      editsMade.current = true;
       const nextScreens = history[historyIndex + 1];
       setScreens(JSON.parse(JSON.stringify(nextScreens)));
       setHistoryIndex(historyIndex + 1);
@@ -864,7 +1098,8 @@ function App() {
     Tabs: { tabs: [{ id: 'tab1', label: 'Tab 1' }, { id: 'tab2', label: 'Tab 2' }], activeTabIndex: 0, sizing: { widthMode: 'fill', heightMode: 'hug' } },
     Overlay: { title: 'Modal Overlay', isOpen: false, bgColor: '#000000', modalBg: '', borderColor: '', layout: { direction: 'column', gap: 8, align: 'stretch', justify: 'flex-start' }, sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
     DataRepeater: { tableName: '', layout: { direction: 'column', gap: 8, align: 'stretch', justify: 'flex-start' }, sizing: { widthMode: 'fill', heightMode: 'hug' } },
-    Form: { targetTable: '', sourceTable: '', filterValue: '', padding: 10, layout: { direction: 'column', gap: 8, align: 'stretch', justify: 'flex-start' }, sizing: { widthMode: 'fill', heightMode: 'hug' } }
+    Form: { targetTable: '', sourceTable: '', filterValue: '', padding: 10, layout: { direction: 'column', gap: 8, align: 'stretch', justify: 'flex-start' }, sizing: { widthMode: 'fill', heightMode: 'hug' } },
+    GameEmbed: { worldId: '', worldName: '', scaling: 'fit', maintainAspect: true, showControls: true, showWindow: true, windowTitle: '', width: 640, height: 360, sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
   }[type] || { text: type });
 
   const mkComp = type => {
@@ -1310,9 +1545,22 @@ function App() {
 
   useEffect(() => {
     const handleShortcuts = (e) => {
-      if (selectedIds.length === 0) return;
       const tagName = e.target?.tagName;
       if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return;
+
+      // Undo/redo work regardless of selection state
+      if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
+      if ((e.key === 'y' || e.key === 'Y') && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+
+      if (selectedIds.length === 0) return;
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const tagName = e.target?.tagName;
@@ -1334,15 +1582,6 @@ function App() {
       if ((e.key === 'd' || e.key === 'D') && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         duplicateComponent(selectedIds);
-      }
-      if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-      }
-      if ((e.key === 'y' || e.key === 'Y') && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        redo();
       }
       if ((e.key === 'c' || e.key === 'C') && (e.ctrlKey || e.metaKey)) {
         const tagName = e.target?.tagName;
@@ -1370,38 +1609,35 @@ function App() {
     document.title = builderName;
   }, [builderName]);
 
-  useEffect(() => { localStorage.setItem('nanostudio_api_key', apiKey); }, [apiKey]);
-  useEffect(() => { localStorage.setItem('nanostudio_api_url', apiUrl); }, [apiUrl]);
-
-  // Load global settings from server
+  // Load settings from server (builderName is global; externalApis are per-user)
   useEffect(() => {
     apiFetch('/api/settings')
       .then(res => res.json())
       .then(data => {
         if (data.builderName) setBuilderName(data.builderName);
-        if (data.apiKey) setApiKey(data.apiKey);
-        if (data.apiUrl) setApiUrl(data.apiUrl);
+        if (data.externalApis) setExternalApis(data.externalApis);
       })
       .catch(err => console.error('Error loading settings:', err));
   }, []);
 
-  // Save global settings to server when changed
+  // Auto-save settings — builderName write is gated to admin on the server
   useEffect(() => {
     if (isInitialLoading.current) return;
-    const settings = { builderName, apiKey, apiUrl };
     apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings)
+      body: JSON.stringify({ builderName, externalApis })
     }).catch(err => console.error('Error saving settings:', err));
-  }, [builderName, apiKey, apiUrl]);
+  }, [builderName, externalApis]);
 
   useEffect(() => {
     if (!currentProject.id || currentProject.id === 'default') {
+      projectLoaded.current = true;
       isInitialLoading.current = false;
       return;
     }
-    
+
+    projectLoaded.current = false;
     isInitialLoading.current = true;
     Promise.all([
       apiFetch(`/api/projects/${currentProject.id}`).then(r => {
@@ -1420,6 +1656,9 @@ function App() {
         if (data.database) setDatabase(data.database);
         if (data.activeWindow) setActiveWindow(data.activeWindow);
         setGameMode(data.gameMode === true);
+        if (data.publishSlug || data.description) {
+          setCurrentProject(p => ({ ...p, publishSlug: data.publishSlug, description: data.description }));
+        }
         // Sidecar is the source of truth; if missing, fall back to inline assets
         // for projects authored before the sidecar split (cheap migration).
         const sidecarHasAny = (sidecar?.sprites?.length || sidecar?.tilesets?.length || sidecar?.sounds?.length);
@@ -1429,25 +1668,21 @@ function App() {
 
         setSaveStatus('');
         // Allow saving after a short delay to ensure React has finished updating state
-        setTimeout(() => { isInitialLoading.current = false; }, 500);
+        setTimeout(() => {
+          projectLoaded.current = true;
+          isInitialLoading.current = false;
+        }, 500);
       })
       .catch((err) => {
         console.error('Error loading project from API:', err);
+        // Don't mark as loaded — keeps auto-save blocked until user reloads the project
         isInitialLoading.current = false;
       });
   }, [currentProject.id]);
 
-  useEffect(() => { 
-    if (isInitialLoading.current) return;
-    
-    // Don't auto-save the default "Untitled" project if it's completely empty
-    if (currentProject.id === 'default') {
-      const isEmpty = screens.every(s => (s.rows || []).length === 0) && (database.tables || []).length === 0;
-      if (isEmpty) return;
-    }
-
-    triggerSave(); 
-  }, [screens, currentScreenId, database, currentProject, theme, viewMode, activeWindow, triggerSave]);
+  useEffect(() => {
+    if (editsMade.current) triggerSave();
+  }, [screens, database, theme, gameMode, triggerSave]);
 
   // ── Stats ─────────────────────────────────────────────────────────────────
   const countAll = (rowsArr) => rowsArr.reduce((acc, row) => acc + countComps(row.children), 0);
@@ -1925,6 +2160,60 @@ function App() {
           </div>
         </div>`;
       }
+      case 'GameEmbed': {
+        const worldId = p.worldId || '';
+        // Mirror GameEmbed.jsx resolvedW/resolvedH: if height/width is falsy use world's native viewport size
+        const _gameWorld = worldId ? screens.find(s => s.id === worldId && s.kind === 'world') : null;
+        const _canonLevel = _gameWorld?.levels?.find(l => l.levelType === 'game' || l.levelType === 'game+hud') || _gameWorld?.levels?.[0];
+        const nativeW = _canonLevel ? ((_canonLevel.viewportCols || 20) * (_canonLevel.tileMap?.tileWidth  || 32)) : 640;
+        const nativeH = _canonLevel ? ((_canonLevel.viewportRows || 14) * (_canonLevel.tileMap?.tileHeight || 32)) : 360;
+        // hug mode mirrors GameEmbed.jsx: 'auto' → nativeW/nativeH (ignore stored p.width/p.height)
+        const embedW = isWidthFill  ? '100%' : (isWidthHug  ? `${nativeW}px` : (p.width  ? `${p.width}px`  : `${nativeW}px`));
+        const embedH = isHeightFill ? '100%' : (isHeightHug ? `${nativeH}px` : (p.height ? `${p.height}px` : `${nativeH}px`));
+        const containerId = `_tfy_embed_${worldId.replace(/[^a-z0-9]/gi, '_')}`;
+        const showWindow = p.showWindow !== false;
+        const showControls = p.showControls !== false;
+        const titleText = escapeHtml(p.windowTitle || p.worldName || 'GAME');
+
+        // Controls bar — matches ControlsCard in GameEmbed.jsx; only rendered when showControls is on
+        const keyStyle = 'display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 3px;border:1px solid rgba(255,255,255,0.25);border-radius:2px;font-size:9px;font-family:monospace;color:rgba(255,255,255,0.6);background:rgba(255,255,255,0.06);';
+        const k = (label) => `<span style="${keyStyle}">${escapeHtml(label)}</span>`;
+        const controlsHtml = showControls
+          ? `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:5px 8px;border:1px solid rgba(255,255,255,0.1);border-top:none;background:rgba(0,0,0,0.7);font-family:monospace;font-size:9px;color:rgba(255,255,255,0.35);user-select:none;flex-shrink:0;">` +
+            `<span style="display:flex;align-items:center;gap:2px;">${k('←')}${k('↑')}${k('↓')}${k('→')}<span style="margin-left:2px;opacity:0.5">/ WASD</span></span>` +
+            `<span style="color:rgba(255,255,255,0.15)">·</span>` +
+            `<span style="display:flex;align-items:center;gap:3px;">${k('SPC')}<span style="opacity:0.5">jump</span></span>` +
+            `<span style="display:flex;align-items:center;gap:3px;">${k('Z')}<span style="opacity:0.5">attack</span></span>` +
+            `<span style="display:flex;align-items:center;gap:3px;">${k('E')}<span style="opacity:0.5">interact</span></span>` +
+            `<span style="display:flex;align-items:center;gap:3px;">${k('⇧')}<span style="opacity:0.5">dash</span></span>` +
+            `</div>`
+          : '';
+
+        // Game canvas container — React player mounts EmbedRuntime here
+        const gameDiv = `<div id="${containerId}" style="width:100%;height:${embedH};display:block;overflow:hidden;flex-shrink:0;"></div>`;
+
+        // Outer column wrapper keeps game + controls stacked vertically,
+        // exactly mirroring the inline-flex column layout of GameEmbed.jsx
+        const outerStyle = `display:${isWidthFill ? 'flex' : 'inline-flex'};flex-direction:column;width:${embedW};`;
+
+        if (showWindow) {
+          return wrapComponent(
+            `<div style="${outerStyle}">` +
+            `<div class="retro-window" style="width:100%;display:flex;flex-direction:column;overflow:hidden;">` +
+            `<div class="retro-window-titlebar"><span class="retro-window-title">${titleText}</span></div>` +
+            gameDiv +
+            `</div>` +
+            controlsHtml +
+            `</div>`
+          );
+        }
+        return wrapComponent(
+          `<div style="${outerStyle}">` +
+          gameDiv +
+          controlsHtml +
+          `</div>`
+        );
+      }
       case 'Data':
         return wrapComponent(`<div class="retro-data" style="font-size:11px;color:var(--text-dim);padding:4px 8px;border:1px dashed var(--border);">[DATA] Table: ${escapeHtml(p.tableName || 'none')} | Source: ${escapeHtml(p.dataSource || 'sqlite')}${p.query ? `<div style="font-size:9px;margin-top:2px;">${p.dataSource === 'sqlite' ? 'Query' : p.dataSource === 'json' ? 'JSON Path' : 'API URL'}: ${escapeHtml(p.query)}</div>` : ''}</div>`);
       case 'Table': {
@@ -1976,39 +2265,62 @@ function App() {
     }
   };
 
-  const exportHTML = () => {
-    console.log('--- exportHTML starting ---');
-    console.log('Current Project:', currentProject);
-    console.log('Screens count:', screens.length);
-    
-    try {
+  // Recursively collect all GameEmbed worldIds from a component tree.
+  const collectGameEmbeds = (comps) => {
+    const found = [];
+    (comps || []).forEach(c => {
+      if (c.type === 'GameEmbed' && c.props?.worldId) {
+        found.push({
+          worldId: c.props.worldId,
+          scaling: c.props.scaling || 'fit',
+          maintainAspect: c.props.maintainAspect !== false,
+        });
+      }
+      if (c.children?.length) found.push(...collectGameEmbeds(c.children));
+    });
+    return found;
+  };
+
+  // Returns the full HTML string for the current page screens.
+  // Called by exportHTML (download) and handlePublish (server publish).
+  const buildPageHtml = () => {
       const t = THEMES[theme];
-    
-    const screensHtml = screens.filter(s => s.kind !== 'world').map((screen, sIdx) => {
+
+    const pageScreens = screens.filter(s => s.kind !== 'world');
+    const screensHtml = pageScreens.map((screen, sIdx) => {
       const rows = screen.rows || [];
-      const isSingleWindow = rows.length === 1 && rows[0].children?.length === 1 && rows[0].children[0].type === 'Window';
-      
-      const rowsHtml = rows.map(row => `<div class="layout-row" style="${styleObjToString({
-        ...layoutToStyles(row.layout),
-        width: '100%',
-        margin: isSingleWindow ? '0' : '12px 0',
-      })}">${(row.children || []).map(c => renderComponentExport(c, row.layout?.direction || 'row')).join('')}</div>`).join('');
+      const isSingleComponent = rows.length === 1 && rows[0].children?.length === 1;
+
+      const rowsHtml = rows.map(row => {
+        const rowSizing = row.props?.sizing || {};
+        const rowStyle = {
+          ...layoutToStyles(row.layout),
+          width: rowSizing.widthMode === 'hug' ? 'fit-content' : '100%',
+          ...(rowSizing.heightMode === 'fill'
+            ? { flex: '1 1 0', minHeight: '0' }
+            : { minHeight: '32px' }),
+          height: rowSizing.heightMode === 'hug' ? 'auto' : undefined,
+          margin: isSingleComponent ? '0' : '12px 0',
+        };
+        return `<div class="layout-row" style="${styleObjToString(rowStyle)}">${(row.children || []).map(c => renderComponentExport(c, row.layout?.direction || 'row')).join('')}</div>`;
+      }).join('');
 
       const previewStyles = styleObjToString({
-        padding: `${canvasPadding.top}px ${canvasPadding.right}px ${canvasPadding.bottom}px ${canvasPadding.left}px`,
-        display: isSingleWindow ? 'flex' : 'block',
-        flexDirection: isSingleWindow ? 'column' : undefined,
-        alignItems: isSingleWindow ? 'center' : undefined,
-        justifyContent: isSingleWindow ? 'center' : undefined,
-        minHeight: isSingleWindow ? '100vh' : undefined,
+        // Single-component: zero padding so the game fills the full viewport height
+        padding: isSingleComponent ? '0' : `${canvasPadding.top}px ${canvasPadding.right}px ${canvasPadding.bottom}px ${canvasPadding.left}px`,
+        display: isSingleComponent ? 'flex' : 'block',
+        flexDirection: isSingleComponent ? 'column' : undefined,
+        alignItems: isSingleComponent ? 'center' : undefined,
+        justifyContent: isSingleComponent ? 'center' : undefined,
+        height: isSingleComponent ? '100%' : undefined,
       });
 
       return `
-        <div id="${screen.id}" class="screen-container" style="display: ${sIdx === 0 ? 'block' : 'none'};" 
-             data-timeout="${screen.settings?.timeout || 0}" 
+        <div id="${screen.id}" class="screen-container${isSingleComponent ? ' full-viewport' : ''}" style="display: ${sIdx === 0 ? 'block' : 'none'};"
+             data-timeout="${screen.settings?.timeout || 0}"
              data-next="${screen.settings?.nextScreenId || ''}">
-          <div class="canvas ${viewMode === 'mobile' ? 'mobile' : ''}">
-            <div class="preview-area ${isSingleWindow ? 'centered' : ''}" style="${previewStyles}">
+          <div class="canvas ${viewMode === 'mobile' ? 'mobile' : ''}${isSingleComponent ? ' full-viewport' : ''}">
+            <div class="preview-area ${isSingleComponent ? 'centered full-viewport' : ''}" style="${previewStyles}">
               ${rowsHtml}
             </div>
           </div>
@@ -2018,40 +2330,53 @@ function App() {
     const dotColor = (t.accent || '#00aa00').replace('#', '%23');
     const baseCss = typeof appCss === 'string' ? appCss : '';
     const css = `${baseCss}
-body { 
-  overflow: auto !important; 
-  min-height: 100vh; 
-  background: ${t.bg}; 
-  color: ${t.text}; 
-  margin: 0; 
-  padding: 0; 
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: ${t.bg};
+  color: ${t.text};
+  margin: 0;
+  padding: 0;
   background-image: url("data:image/svg+xml,%3Csvg width='8' height='8' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='0' y='0' width='2' height='2' fill='${dotColor}' opacity='0.08'/%3E%3Crect x='4' y='4' width='2' height='2' fill='${dotColor}' opacity='0.08'/%3E%3C/svg%3E");
   background-size: 8px 8px;
   background-repeat: repeat;
 }
-.screen-container { width: 100%; min-height: 100vh; }
-.screen-container.staggered { background: transparent !important; }
-.canvas { 
-  width: 100%; 
-  margin: 0; 
-  display: flex; 
-  flex-direction: column; 
-  background: transparent !important; 
-  border: none !important; 
+/* screen-container fills the viewport and scrolls — mirrors .canvas { overflow: auto } in the builder */
+.screen-container {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
 }
-.canvas.mobile { 
-  max-width: 420px; 
-  margin: 0 auto; 
-  background: transparent !important; 
+/* single-component screens (game embeds, single windows) never scroll — content is centered */
+.screen-container.full-viewport { overflow: hidden; }
+.screen-container.staggered { background: transparent !important; }
+.canvas {
+  width: 100%;
+  margin: 0;
+  flex: none !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  display: flex;
+  flex-direction: column;
+  background: transparent !important;
+  border: none !important;
+}
+.canvas.full-viewport { height: 100% !important; }
+.canvas.mobile {
+  max-width: 420px;
+  margin: 0 auto;
+  background: transparent !important;
   border: none !important;
 }
 .preview-area {
   min-width: 0;
   width: 100%;
-  flex: 1;
   height: auto !important;
+  min-height: 0;
+  overflow: visible !important;
   background: transparent !important;
 }
+.preview-area.full-viewport { height: 100% !important; min-height: 0 !important; }
 .retro-window-content {
   flex: 1 1 auto !important;
   min-height: 40px !important;
@@ -2241,19 +2566,34 @@ ${css}
       }
     };
   </script>
+${(() => {
+  // Detect GameEmbed components and inject runtime for each unique world
+  const allEmbeds = pageScreens.flatMap(s =>
+    (s.rows || []).flatMap(r => collectGameEmbeds(r.children || []))
+  );
+  const seen = new Set();
+  const unique = allEmbeds.filter(e => { if (seen.has(e.worldId)) return false; seen.add(e.worldId); return true; });
+  if (!unique.length) return '';
+  const safeJsonEmbed = (obj) => JSON.stringify(obj).replace(/<\//g, '<\\/').replace(/<!--/g, '<\\!--');
+  const embedData = unique.map(({ worldId, scaling, maintainAspect }) => {
+    const world = screens.find(s => s.id === worldId && s.kind === 'world');
+    if (!world) return null;
+    const containerId = `_tfy_embed_${worldId.replace(/[^a-z0-9]/gi, '_')}`;
+    return `{ containerId: '${containerId}', scaling: '${scaling}', maintainAspect: ${maintainAspect}, world: ${safeJsonEmbed(world)}, assets: ${safeJsonEmbed(assets)} }`;
+  }).filter(Boolean).join(',\n  ');
+  return `  <script>window.__TUIFY_EMBEDS__=[${embedData}];</script>\n  <script src="/runtime/tuify-game.js"></script>`;
+})()}
 </body>
 </html>`;
 
-    console.log('Final HTML length:', html.length);
-    const baseName = `${currentProject.name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_\-]/g, '') || 'project'}`;
-    console.log('Base name for file:', baseName);
-    
-    // Log full HTML for agent to "deploy"
-    console.log('--- DEPLOY_START ---');
-    console.log(html);
-    console.log('--- DEPLOY_END ---');
+    return html;
+  };
 
-    downloadFile(`${baseName}.html`, html, 'text/html');
+  const exportHTML = () => {
+    try {
+      const html = buildPageHtml();
+      const baseName = `${currentProject.name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_\-]/g, '') || 'project'}`;
+      downloadFile(`${baseName}.html`, html, 'text/html');
     } catch (err) {
       console.error('Error in exportHTML:', err);
     }
@@ -2286,6 +2626,24 @@ ${css}
     window.openDatabasePanel = () => setViewMode('database');
     return () => { delete window.openDatabasePanel; };
   }, []);
+
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handler = (e) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) setShowExportMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showExportMenu]);
+
+  useEffect(() => {
+    if (!showThemeMenu) return;
+    const handler = (e) => {
+      if (themeMenuRef.current && !themeMenuRef.current.contains(e.target)) setShowThemeMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showThemeMenu]);
 
   const loadProject = async (id) => {
     try {
@@ -2412,14 +2770,56 @@ ${css}
         .app.gm-on .toolbox h3 { color: var(--accent); }
       `}</style>
       <div className={`app ${theme}${gameMode ? ' gm-on' : ''}`}>
-        <div className="toolbar">
-          {Object.entries(THEMES).map(([key, t]) => (
-            <button key={key} className={`toolbar-btn ${theme === key ? 'active' : ''}`} onClick={() => setTheme(key)}>{t.name}</button>
-          ))}
+        <div className="toolbar" style={{ display: 'flex', alignItems: 'center' }}>
+          <div style={{ position: 'relative' }} ref={themeMenuRef}>
+            <button className="toolbar-btn" onClick={() => setShowThemeMenu(v => !v)}
+              style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ display: 'flex', gap: 2 }}>
+                {['bg','border','text','accent'].map(k => (
+                  <span key={k} style={{ width: 7, height: 7, borderRadius: 1, background: THEMES[theme][k], display: 'inline-block' }} />
+                ))}
+              </span>
+              {THEMES[theme].name} <span style={{ fontSize: 8, opacity: 0.7 }}>▼</span>
+            </button>
+            {showThemeMenu && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, zIndex: 9999,
+                background: 'var(--bg)', border: '1px solid var(--border)',
+                minWidth: 180, boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                display: 'flex', flexDirection: 'column',
+              }}>
+                {Object.entries(THEMES).map(([key, t]) => (
+                  <button key={key} onClick={() => { setTheme(key); editsMade.current = true; setShowThemeMenu(false); }}
+                    style={{
+                      padding: '7px 10px', background: theme === key ? 'var(--selected)' : 'transparent',
+                      border: 'none', borderBottom: '1px solid var(--border)',
+                      color: 'var(--text)', fontFamily: 'monospace', fontSize: 11,
+                      textAlign: 'left', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}
+                    onMouseEnter={e => { if (key !== theme) e.currentTarget.style.background = 'var(--selected)'; }}
+                    onMouseLeave={e => { if (key !== theme) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{
+                      display: 'inline-flex', gap: 0, borderRadius: 2, overflow: 'hidden',
+                      border: `1px solid ${t.border}`, flexShrink: 0,
+                    }}>
+                      <span style={{ width: 14, height: 18, background: t.bg, display: 'inline-block' }} />
+                      <span style={{ width: 14, height: 18, background: t.border, display: 'inline-block' }} />
+                      <span style={{ width: 14, height: 18, background: t.text, display: 'inline-block' }} />
+                      <span style={{ width: 14, height: 18, background: t.accent, display: 'inline-block' }} />
+                    </span>
+                    <span>{t.name}</span>
+                    {theme === key && <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.6 }}>✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <span className="toolbar-sep">|</span>
           <button
             className={`toolbar-btn ${gameMode ? 'gm-active' : ''}`}
-            onClick={() => setGameMode(g => !g)}
+            onClick={() => { setGameMode(g => !g); editsMade.current = true; }}
             title="Toggle Game Mode"
           >
             Game Mode
@@ -2437,7 +2837,35 @@ ${css}
           <button className={`toolbar-btn ${viewMode === 'desktop' ? 'active' : ''}`} onClick={() => setViewMode('desktop')}>Desktop</button>
           <button className={`toolbar-btn ${viewMode === 'mobile' ? 'active' : ''}`} onClick={() => setViewMode('mobile')}>Mobile</button>
           <span className="toolbar-sep">|</span>
-          <button className="toolbar-btn" onClick={exportHTML}>Export</button>
+          <div style={{ position: 'relative' }} ref={exportMenuRef}>
+            <button className="toolbar-btn" onClick={() => setShowExportMenu(v => !v)}
+              style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              Export <span style={{ fontSize: 8, opacity: 0.7 }}>▼</span>
+            </button>
+            {showExportMenu && (
+              <div style={{
+                position: 'absolute', top: '100%', right: 0, zIndex: 9999,
+                background: 'var(--bg)', border: '1px solid var(--border)',
+                minWidth: 170, boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                display: 'flex', flexDirection: 'column',
+              }}>
+                <button onClick={() => { exportHTML(); setShowExportMenu(false); }}
+                  style={{ padding: '8px 12px', background: 'transparent', border: 'none', color: 'var(--text)', fontFamily: 'monospace', fontSize: 11, textAlign: 'left', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--selected)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  Export HTML
+                </button>
+                <button onClick={() => { handleOpenPublish(); setShowExportMenu(false); }}
+                  style={{ padding: '8px 12px', background: 'transparent', border: 'none', color: 'var(--accent)', fontFamily: 'monospace', fontSize: 11, textAlign: 'left', cursor: 'pointer', fontWeight: 'bold' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--selected)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  Publish to TUIFY
+                </button>
+              </div>
+            )}
+          </div>
           <button className="toolbar-btn" onClick={() => setShowDatabase(!showDatabase)}>Database</button>
           <button className="toolbar-btn" onClick={() => setShowProjects(!showProjects)}>Projects</button>
           <button className="toolbar-btn" onClick={() => selectedIds.length > 0 && duplicateComponent(selectedIds)} disabled={selectedIds.length === 0}>Duplicate</button>
@@ -2459,9 +2887,9 @@ ${css}
               className="toolbar-btn"
               onClick={handleLogout}
               title={`Signed in as ${currentUser.email}`}
-              style={{ fontSize: 11, opacity: 0.7 }}
+              style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.7 }}
             >
-              {currentUser.email.split('@')[0]} ✕
+              Logout
             </button>
           )}
         </div>
@@ -2534,8 +2962,13 @@ ${css}
                 onDeleteEntities={(ids) => deleteEntities(activeScreen.id, activeLevel.id, ids)}
                 paintBrush={paintBrush}
                 onUpdateLevel={(patch) => updateLevel(activeScreen.id, activeLevel.id, patch)}
+                selectedColliderShapeId={selectedColliderShapeId}
+                onSelectColliderShape={setSelectedColliderShapeId}
+                selectedOcclusionShapeId={selectedOcclusionShapeId}
+                onSelectOcclusionShape={setSelectedOcclusionShapeId}
               />
             ) : (
+            <GameContext.Provider value={{ screens, assets }}>
             <Canvas
               rows={rows}
               selectedIds={selectedIds}
@@ -2563,8 +2996,8 @@ ${css}
               }}
               onLogin={(tableName, credentials) => {
                 const table = database.data[tableName] || [];
-                const user = table.find(u => 
-                  String(u.email || u.username) === String(credentials.email || credentials.username) && 
+                const user = table.find(u =>
+                  String(u.email || u.username) === String(credentials.email || credentials.username) &&
                   String(u.password) === String(credentials.password)
                 );
                 if (user) {
@@ -2578,6 +3011,7 @@ ${css}
               }}
               currentUser={currentUser}
             />
+            </GameContext.Provider>
             )}
 
             {showUserJourney && (
@@ -2667,6 +3101,10 @@ ${css}
             onUpdateEntity={(entityId, patch) => activeLevel && updateEntity(activeScreen.id, activeLevel.id, entityId, patch)}
             paintBrush={paintBrush}
             onSetPaintBrush={setPaintBrush}
+            selectedColliderShapeId={selectedColliderShapeId}
+            onSelectColliderShape={setSelectedColliderShapeId}
+            selectedOcclusionShapeId={selectedOcclusionShapeId}
+            onSelectOcclusionShape={setSelectedOcclusionShapeId}
             onAddBackgroundLayer={(assetId) => activeLevel && addBackgroundLayer(activeScreen.id, activeLevel.id, assetId)}
             onUpdateBackgroundLayer={(layerId, patch) => activeLevel && updateBackgroundLayer(activeScreen.id, activeLevel.id, layerId, patch)}
             onRemoveBackgroundLayer={(layerId) => activeLevel && removeBackgroundLayer(activeScreen.id, activeLevel.id, layerId)}
@@ -2774,9 +3212,9 @@ ${css}
 
         {showSettings && (
           <div className="projects-overlay" onClick={() => setShowSettings(false)}>
-            <div className="projects-modal" 
-                 onClick={e => e.stopPropagation()} 
-                 style={{ maxWidth: '400px' }}
+            <div className="projects-modal"
+                 onClick={e => e.stopPropagation()}
+                 style={{ maxWidth: '440px', maxHeight: '85vh', overflowY: 'auto' }}
                  onKeyDown={e => e.key === 'Escape' && setShowSettings(false)}
                  tabIndex={-1}
             >
@@ -2785,56 +3223,363 @@ ${css}
                 <button className="modal-close" onClick={() => setShowSettings(false)}>X</button>
               </div>
               <div className="modal-body">
-                <div className="property-group">
-                  <label>BUILDER NAME</label>
-                  <input 
-                    type="text" 
-                    value={builderName} 
-                    onChange={e => setBuilderName(e.target.value)} 
-                    style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '8px', width: '100%', fontFamily: 'monospace' }}
-                  />
+
+                {/* ── Profile ──────────────────────────────────────── */}
+                <div style={{ border: '1px solid var(--border)', padding: '16px', position: 'relative', marginBottom: 20 }}>
+                  <div style={{ position: 'absolute', top: '-10px', left: '10px', background: 'var(--panel-bg)', padding: '0 5px', fontSize: '11px', color: 'var(--accent)' }}>Profile</div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+                    {/* Avatar */}
+                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                      {currentUser?.avatarUrl ? (
+                        <img src={currentUser.avatarUrl} alt="avatar"
+                          style={{ width: 56, height: 56, borderRadius: '50%', border: '2px solid var(--border)', objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: 56, height: 56, borderRadius: '50%', border: '2px solid var(--border)', background: 'var(--selected)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, color: 'var(--accent)', fontFamily: 'monospace' }}>
+                          {(currentUser?.displayName || currentUser?.email || '?')[0].toUpperCase()}
+                        </div>
+                      )}
+                      {/* Upload overlay */}
+                      <label style={{ position: 'absolute', inset: 0, borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', opacity: 0, transition: 'opacity 0.15s' }}
+                        onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                        onMouseLeave={e => e.currentTarget.style.opacity = 0}
+                        title="Upload avatar">
+                        <span style={{ color: '#fff', fontSize: 10, fontFamily: 'monospace', pointerEvents: 'none' }}>{avatarUploading ? '...' : 'EDIT'}</span>
+                        <input type="file" accept="image/*" style={{ display: 'none' }}
+                          onChange={e => e.target.files[0] && handleAvatarUpload(e.target.files[0])} />
+                      </label>
+                    </div>
+
+                    {/* Name + email */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>DISPLAY NAME</div>
+                      <input type="text" value={settingsDisplayName} onChange={e => setSettingsDisplayName(e.target.value)}
+                        style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '5px 8px', width: '100%', fontFamily: 'monospace', fontSize: 12, boxSizing: 'border-box' }} />
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {currentUser?.email}
+                      </div>
+                      {currentUser?.xHandle && (
+                        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>@{currentUser.xHandle} (X)</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button className="modal-action-btn"
+                      onClick={handleProfileSave}
+                      disabled={profileSaving || settingsDisplayName === currentUser?.displayName}
+                      style={{ fontSize: 11, padding: '4px 14px' }}>
+                      {profileSaving ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
                 </div>
 
-                <div style={{ marginTop: 24 }}>
-                  <div className="retro-frame" style={{ padding: '12px', border: '1px solid var(--border)', position: 'relative' }}>
-                    <div style={{ position: 'absolute', top: '-10px', left: '10px', background: 'var(--panel-bg)', padding: '0 5px', fontSize: '11px', color: 'var(--accent)' }}>Backend</div>
-                    
-                    <div style={{ fontSize: '12px', color: 'var(--text)', marginBottom: '15px' }}>Connect to backend.</div>
-                    
-                    <div className="property-group" style={{ marginBottom: '12px' }}>
-                      <label>API KEY:</label>
-                      <input 
-                        type="text" 
-                        value={apiKey} 
-                        onChange={e => setApiKey(e.target.value)} 
-                        placeholder="Enter API KEY..."
-                        style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px', width: '100%', fontFamily: 'monospace' }}
-                      />
+                {/* ── Builder Name (admin only) ─────────────────────── */}
+                {currentUser?.role === 'admin' && (
+                  <div style={{ border: '1px solid var(--border)', padding: '16px', position: 'relative', marginBottom: 20 }}>
+                    <div style={{ position: 'absolute', top: '-10px', left: '10px', background: 'var(--panel-bg)', padding: '0 5px', fontSize: '11px', color: 'var(--accent)' }}>Builder Name</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>Visible to all users as the app title.</div>
+                    <input type="text" value={builderName} onChange={e => setBuilderName(e.target.value)}
+                      style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                  </div>
+                )}
+
+                {/* ── TUIFY API ─────────────────────────────────────── */}
+                <div style={{ border: '1px solid var(--border)', padding: '16px', position: 'relative', marginBottom: 20 }}>
+                  <div style={{ position: 'absolute', top: '-10px', left: '10px', background: 'var(--panel-bg)', padding: '0 5px', fontSize: '11px', color: 'var(--accent)' }}>TUIFY API</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10 }}>Your session token for API access.</div>
+
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>BACKEND URL</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input readOnly value={`${window.location.origin}/api`}
+                        style={{ flex: 1, background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text-dim)', padding: '5px 8px', fontFamily: 'monospace', fontSize: 11 }} />
                     </div>
-                    
-                    <div className="property-group">
-                      <label>API Public URL:</label>
-                      <input 
-                        type="text" 
-                        value={apiUrl} 
-                        onChange={e => setApiUrl(e.target.value)} 
-                        placeholder="Enter public URL..."
-                        style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px', width: '100%', fontFamily: 'monospace' }}
-                      />
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>JWT TOKEN</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input readOnly value={getToken() || '—'} type="password"
+                        style={{ flex: 1, background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text-dim)', padding: '5px 8px', fontFamily: 'monospace', fontSize: 11 }} />
+                      <button className="modal-action-btn" style={{ fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap' }}
+                        onClick={() => { navigator.clipboard.writeText(getToken() || ''); setTokenCopied(true); setTimeout(() => setTokenCopied(false), 1500); }}>
+                        {tokenCopied ? 'Copied!' : 'Copy'}
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                <div style={{ marginTop: 24, textAlign: 'center' }}>
+                {/* ── External Services ─────────────────────────────── */}
+                <div style={{ border: '1px solid var(--border)', padding: '16px', position: 'relative' }}>
+                  <div style={{ position: 'absolute', top: '-10px', left: '10px', background: 'var(--panel-bg)', padding: '0 5px', fontSize: '11px', color: 'var(--accent)' }}>External Services</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12 }}>Named API connections your app components can reference.</div>
+
+                  {externalApis.map(api => (
+                    <div key={api.id} style={{ border: '1px solid var(--border)', padding: '10px', marginBottom: 10, position: 'relative' }}>
+                      <button onClick={() => removeExternalApi(api.id)}
+                        style={{ position: 'absolute', top: 6, right: 6, background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 12, lineHeight: 1 }}>X</button>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 3 }}>NAME</div>
+                          <input value={api.name} onChange={e => updateExternalApi(api.id, 'name', e.target.value)} placeholder="My API"
+                            style={{ width: '100%', background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', fontFamily: 'monospace', fontSize: 11, boxSizing: 'border-box' }} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 3 }}>URL</div>
+                          <input value={api.url} onChange={e => updateExternalApi(api.id, 'url', e.target.value)} placeholder="https://api.example.com"
+                            style={{ width: '100%', background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', fontFamily: 'monospace', fontSize: 11, boxSizing: 'border-box' }} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 3 }}>AUTH HEADER</div>
+                          <input value={api.authHeader} onChange={e => updateExternalApi(api.id, 'authHeader', e.target.value)} placeholder="Authorization"
+                            style={{ width: '100%', background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', fontFamily: 'monospace', fontSize: 11, boxSizing: 'border-box' }} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 3 }}>AUTH VALUE</div>
+                          <input value={api.authValue} onChange={e => updateExternalApi(api.id, 'authValue', e.target.value)} placeholder="Bearer ..." type="password"
+                            style={{ width: '100%', background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', fontFamily: 'monospace', fontSize: 11, boxSizing: 'border-box' }} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  <button className="modal-action-btn" onClick={addExternalApi}
+                    style={{ fontSize: 11, padding: '5px 12px', marginTop: 4 }}>
+                    + Add API
+                  </button>
                 </div>
+
               </div>
             </div>
           </div>
         )}
 
         {showDatabase && (
-          <DatabasePanel database={database} setDatabase={setDatabase} onClose={() => setShowDatabase(false)} />
+          <DatabasePanel database={database} setDatabase={(updater) => { editsMade.current = true; setDatabase(updater); }} onClose={() => setShowDatabase(false)} />
         )}
+
+        {/* ── Publish Modal ──────────────────────────────────────────────── */}
+        {showPublish && (() => {
+          const pageScreens = screens.filter(s => s.kind !== 'world');
+          const worlds      = screens.filter(s => s.kind === 'world');
+          const hasPage = pageScreens.length > 0;
+          const hasGame = worlds.length > 0;
+
+          // Detect GameEmbed components in page screens
+          const findEmbedIds = (comps) => (comps || []).flatMap(c =>
+            c.type === 'GameEmbed' && c.props?.worldId ? [c.props.worldId]
+            : c.children ? findEmbedIds(c.children) : []
+          );
+          const embeddedWorldIds = pageScreens.flatMap(s =>
+            (s.rows || []).flatMap(r => findEmbedIds(r.children || []))
+          );
+          const hasGameEmbed = embeddedWorldIds.length > 0;
+          const embeddedWorlds = [...new Set(embeddedWorldIds)].map(id => worlds.find(w => w.id === id)).filter(Boolean);
+
+          // Which modes are available
+          const availableModes = [];
+          if (hasPage) availableModes.push('page');
+          if (hasGame && !hasGameEmbed) availableModes.push('game');
+          if (hasPage && hasGame && !hasGameEmbed) availableModes.push('page+game');
+
+          const modeLabel = { page: 'Page', game: 'Game only', 'page+game': 'Page + Game' };
+          const modeDesc  = {
+            page:       hasGameEmbed
+              ? `Page with ${embeddedWorlds.map(w=>w.name).join(', ')} embedded — game launches in-page.`
+              : 'Publishes your screens as a website.',
+            game:       'Publishes a playable standalone game.',
+            'page+game':'Publishes your page with a floating ▶ Play button that launches the game as a fullscreen overlay.',
+          };
+
+          const inputStyle = { width: '100%', background: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', fontFamily: 'monospace', fontSize: 12, boxSizing: 'border-box' };
+          const labelStyle = { fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 };
+
+          return (
+            <div className="projects-overlay" onClick={() => setShowPublish(false)}>
+              <div className="projects-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480, maxHeight: '88vh', overflowY: 'auto' }}
+                   onKeyDown={e => e.key === 'Escape' && setShowPublish(false)} tabIndex={-1}>
+                <div className="modal-titlebar">
+                  <span className="modal-title">[ Publish Project ]</span>
+                  <button className="modal-close" onClick={() => setShowPublish(false)}>X</button>
+                </div>
+                <div className="modal-body">
+
+                  {publishStatus === 'done' ? (
+                    /* ── Success state ── */
+                    <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                      <div style={{ fontSize: 13, color: 'var(--accent)', marginBottom: 12 }}>Published!</div>
+                      <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
+                        <input readOnly value={publishUrl} style={{ ...inputStyle, fontSize: 11 }} />
+                        <button className="modal-action-btn" style={{ fontSize: 11 }}
+                          onClick={() => navigator.clipboard.writeText(publishUrl)}>Copy</button>
+                        <a href={publishUrl} target="_blank" rel="noopener noreferrer"
+                          style={{ padding: '5px 10px', border: '1px solid var(--border)', color: 'var(--accent)', textDecoration: 'none', fontFamily: 'monospace', fontSize: 11 }}>Open</a>
+                      </div>
+                      <button className="modal-action-btn" style={{ fontSize: 11 }} onClick={() => setPublishStatus('idle')}>Update / Re-publish</button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* ── Content detection ── */}
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8, letterSpacing: 1 }}>PROJECT CONTENT</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+                            <span style={{ color: hasPage ? 'var(--accent)' : 'var(--text-dim)' }}>{hasPage ? '✓' : '○'}</span>
+                            <span style={{ color: hasPage ? 'var(--text)' : 'var(--text-dim)' }}>
+                              Page — {hasPage ? `${pageScreens.length} screen${pageScreens.length !== 1 ? 's' : ''}` : 'no screens'}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+                            <span style={{ color: hasGame ? 'var(--accent)' : 'var(--text-dim)' }}>{hasGame ? '✓' : '○'}</span>
+                            <span style={{ color: hasGame ? 'var(--text)' : 'var(--text-dim)' }}>
+                              Game — {hasGame
+                                ? `${worlds.length} world${worlds.length !== 1 ? 's' : ''}, ${worlds.reduce((n, w) => n + (w.levels?.length || 0), 0)} levels`
+                                : 'no worlds (enable Game Mode to add)'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ── Mode selector ── */}
+                      {availableModes.length > 0 ? (
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ ...labelStyle, letterSpacing: 1 }}>PUBLISH AS</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {availableModes.map(m => (
+                              <button key={m} onClick={() => setPublishMode(m)}
+                                style={{
+                                  padding: '8px 10px', border: '1px solid var(--border)',
+                                  background: publishMode === m ? 'var(--selected)' : 'transparent',
+                                  color: publishMode === m ? 'var(--text)' : 'var(--text-dim)',
+                                  fontFamily: 'monospace', fontSize: 11, textAlign: 'left', cursor: 'pointer',
+                                  display: 'flex', flexDirection: 'column', gap: 2,
+                                }}>
+                                <span style={{ color: publishMode === m ? 'var(--accent)' : 'inherit', fontWeight: publishMode === m ? 'bold' : 'normal' }}>
+                                  {publishMode === m ? '▶ ' : '  '}{modeLabel[m]}
+                                </span>
+                                <span style={{ fontSize: 10, opacity: 0.7 }}>{modeDesc[m]}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ padding: '10px 12px', background: 'var(--selected)', border: '1px solid var(--border)', marginBottom: 14, fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                          Add some screens or enable Game Mode to start building something publishable.
+                        </div>
+                      )}
+
+                      {/* ── Game summary (all worlds are included) ── */}
+                      {(publishMode === 'game' || publishMode === 'page+game') && worlds.length > 0 && (
+                        <div style={{ marginBottom: 12, padding: '7px 10px', background: 'var(--selected)', fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                          {worlds.map((w, i) => (
+                            <div key={w.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <span style={{ color: 'var(--text-dim)', fontFamily: 'monospace' }}>{i + 1}.</span>
+                              <span style={{ color: 'var(--text)' }}>{w.name}</span>
+                              <span style={{ opacity: 0.5 }}>— {w.levels?.length || 0} level{(w.levels?.length || 0) !== 1 ? 's' : ''}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* ── Title / Slug / Description ── sync back to Screen/World settings ── */}
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={labelStyle}>
+                          TITLE
+                          <span style={{ opacity: 0.5, marginLeft: 6 }}>
+                            {publishMode === 'game' ? '(project name)' : '(screen web title)'}
+                          </span>
+                        </div>
+                        <input type="text" value={publishTitle}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setPublishTitle(v);
+                            if (pageScreens[0] && publishMode !== 'game') {
+                              updateScreen(pageScreens[0].id, { settings: { ...(pageScreens[0].settings || {}), webTitle: v } });
+                            }
+                            setCurrentProject(p => ({ ...p, name: v }));
+                            editsMade.current = true;
+                          }}
+                          style={inputStyle} />
+                      </div>
+
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={labelStyle}>SLUG <span style={{ opacity: 0.5 }}>(URL path)</span></div>
+                        <input type="text" value={publishSlug}
+                          onChange={e => {
+                            const v = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+                            setPublishSlug(v);
+                            if (pageScreens[0] && publishMode !== 'game') {
+                              updateScreen(pageScreens[0].id, { settings: { ...(pageScreens[0].settings || {}), slug: v } });
+                            }
+                            setCurrentProject(p => ({ ...p, publishSlug: v }));
+                            editsMade.current = true;
+                          }}
+                          placeholder="my-project" style={inputStyle} />
+                        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 3 }}>
+                          tuify.app / username / {publishSlug || '...'}
+                        </div>
+                      </div>
+
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={labelStyle}>DESCRIPTION <span style={{ opacity: 0.5 }}>(optional)</span></div>
+                        <textarea value={publishDesc} rows={2}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setPublishDesc(v);
+                            if (pageScreens[0] && publishMode !== 'game') {
+                              updateScreen(pageScreens[0].id, { settings: { ...(pageScreens[0].settings || {}), description: v } });
+                            }
+                            setCurrentProject(p => ({ ...p, description: v }));
+                            editsMade.current = true;
+                          }}
+                          style={{ ...inputStyle, resize: 'vertical' }} />
+                      </div>
+
+                      {publishError && <div style={{ color: '#f44', fontSize: 11, marginBottom: 10, fontFamily: 'monospace' }}>{publishError}</div>}
+
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button className="modal-action-btn" onClick={handlePublish}
+                          disabled={publishStatus === 'publishing' || !publishSlug || availableModes.length === 0}
+                          style={{ minWidth: 100 }}>
+                          {publishStatus === 'publishing' ? 'Publishing...' : 'Publish'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── Already published list ── */}
+                  {publishedList.length > 0 && (
+                    <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 16 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, letterSpacing: 1 }}>YOUR PUBLISHED ITEMS</div>
+                      {publishedList.map(p => (
+                        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.title || p.slug}</span>
+                              {p.publish_mode && <span style={{ fontSize: 9, color: 'var(--text-dim)', border: '1px solid var(--border)', padding: '1px 4px', flexShrink: 0 }}>{p.publish_mode}</span>}
+                            </div>
+                            <div style={{ fontSize: 10, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.url}</div>
+                          </div>
+                          <a href={p.url} target="_blank" rel="noopener noreferrer"
+                            style={{ fontSize: 10, padding: '3px 8px', border: '1px solid var(--border)', color: 'var(--text)', textDecoration: 'none', fontFamily: 'monospace', flexShrink: 0 }}>Open</a>
+                          {p.source_id === currentProject?.id && (
+                            <button onClick={() => handleRepublishItem(p)}
+                              disabled={publishStatus === 'publishing'}
+                              style={{ fontSize: 10, padding: '3px 8px', border: '1px solid var(--accent)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', fontFamily: 'monospace', flexShrink: 0 }}>Republish</button>
+                          )}
+                          <button onClick={() => handleUnpublish(p.slug)}
+                            style={{ fontSize: 10, padding: '3px 8px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-dim)', cursor: 'pointer', fontFamily: 'monospace', flexShrink: 0 }}>Remove</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {showSpriteSheetManager && (
           <SpriteSheetManager

@@ -63,3 +63,29 @@ CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
 -- owner_id on assets
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS owner_id TEXT REFERENCES users(id);
 CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_id);
+
+-- username: URL-safe handle, unique per user
+ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE;
+
+-- ─── Phase 7: Published pages ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS published_pages (
+  id           TEXT         PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  owner_id     TEXT         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  source_id    TEXT         NOT NULL,   -- project id (contains the world)
+  world_id     TEXT,                    -- screen id of the world (null for page-only publishes)
+  slug         TEXT         NOT NULL,
+  title        TEXT,
+  description  TEXT,
+  html_path    TEXT,                    -- filesystem path to stored HTML
+  published_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  is_public    BOOLEAN      NOT NULL DEFAULT true,
+  visit_count  BIGINT       NOT NULL DEFAULT 0,
+  publish_mode TEXT         NOT NULL DEFAULT 'game',  -- page | game | page+game
+  UNIQUE (owner_id, slug)
+);
+ALTER TABLE published_pages ADD COLUMN IF NOT EXISTS publish_mode TEXT NOT NULL DEFAULT 'game';
+-- Make world_id nullable to support page-only publishes
+ALTER TABLE published_pages ALTER COLUMN world_id DROP NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_published_owner ON published_pages(owner_id);
+CREATE INDEX IF NOT EXISTS idx_published_slug  ON published_pages(owner_id, slug);

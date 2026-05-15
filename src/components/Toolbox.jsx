@@ -30,6 +30,9 @@ const PALETTE = [
   { kind: 'item', type: 'Tabs', label: 'Tabs' },
   { kind: 'item', type: 'Overlay', label: 'Overlay' },
 
+  { kind: 'section', label: 'EMBED' },
+  { kind: 'item', type: 'GameEmbed', label: 'GameEmbed' },
+
   { kind: 'section', label: 'GAME', requires: 'gameMode' },
   { kind: 'item', type: 'GameEntity', label: 'GameEntity', requires: 'gameMode', dragType: 'GAME_COMPONENT' },
   // TileMap is configured per-Level in the Inspector — not a draggable component.

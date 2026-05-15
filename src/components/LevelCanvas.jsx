@@ -275,6 +275,8 @@ function ColliderShapesLayer({
   isDrawing, isDrawingMask,
   onCommitShape, onUpdateShapePoints,
   onCommitOcclusionShape, onUpdateOcclusionShapePoints,
+  selectedColliderShapeId, onSelectColliderShape, onDeleteShape,
+  selectedOcclusionShapeId, onSelectOcclusionShape, onDeleteOcclusionShape,
 }) {
   const [inProgress, setInProgress] = useState(null); // { points: [{x,y}] }
   const [cursor, setCursor]         = useState(null);
@@ -296,12 +298,15 @@ function ColliderShapesLayer({
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
       if (e.key === 'Backspace' || e.key === 'Delete') {
-        // Remove last placed point while drawing.
-        setInProgress(prev => {
-          if (!prev?.points?.length) return prev;
-          const pts = prev.points.slice(0, -1);
-          return pts.length ? { ...prev, points: pts } : null;
-        });
+        if (inProgress?.points?.length) {
+          // Remove last placed point while actively drawing.
+          const pts = inProgress.points.slice(0, -1);
+          setInProgress(pts.length ? { ...inProgress, points: pts } : null);
+        } else if (selectedColliderShapeId) {
+          onDeleteShape?.(selectedColliderShapeId);
+        } else if (selectedOcclusionShapeId) {
+          onDeleteOcclusionShape?.(selectedOcclusionShapeId);
+        }
         return;
       }
       if (e.key === 'Escape') {
@@ -316,7 +321,7 @@ function ColliderShapesLayer({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activeMode, onCommitShape, onCommitOcclusionShape]);
+  }, [activeMode, inProgress, selectedColliderShapeId, onDeleteShape, selectedOcclusionShapeId, onDeleteOcclusionShape, onCommitShape, onCommitOcclusionShape]);
 
   const toLocal = (e) => {
     const rect = svgRef.current.getBoundingClientRect();
@@ -410,34 +415,115 @@ function ColliderShapesLayer({
           ? dragPts : rawPts;
         if (!pts.length) return null;
         const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
+        const isSelected = shape.id === selectedOcclusionShapeId;
+        const selectMask = () => onSelectOcclusionShape?.(shape.id);
         return (
           <g key={shape.id || si}>
-            <path d={d} fill="rgba(160,0,255,0.12)" stroke="rgba(180,0,255,0.85)" strokeWidth={2} strokeDasharray="5 3" />
+            {/* Wide hit area for clicking the mask polygon */}
+            <path d={d} fill="transparent" stroke="transparent" strokeWidth={12}
+              style={{ pointerEvents: 'all', cursor: 'pointer' }}
+              onPointerDown={(e) => { if (e.button === 0) selectMask(); }}
+              onClick={(e) => e.stopPropagation()}
+            />
+            <path d={d}
+              fill={isSelected ? 'rgba(200,100,255,0.18)' : 'rgba(160,0,255,0.12)'}
+              stroke={isSelected ? 'rgba(220,120,255,1)' : 'rgba(180,0,255,0.85)'}
+              strokeWidth={isSelected ? 2.5 : 2} strokeDasharray="5 3"
+              style={{ pointerEvents: 'none' }}
+            />
+            {isSelected && (
+              <path d={d} fill="none" stroke="rgba(220,120,255,0.2)" strokeWidth={7}
+                style={{ pointerEvents: 'none' }} />
+            )}
             {pts.map((p, pi) => (
-              <circle key={pi} cx={p.x} cy={p.y} r={5}
-                fill="rgba(180,0,255,0.9)" stroke="rgba(0,0,0,0.6)" strokeWidth={1}
+              <circle key={pi} cx={p.x} cy={p.y} r={isSelected ? 6 : 5}
+                fill={isSelected ? 'rgba(220,120,255,1)' : 'rgba(180,0,255,0.9)'}
+                stroke={isSelected ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.6)'} strokeWidth={1}
                 style={{ cursor: 'grab', pointerEvents: 'all' }}
-                onPointerDown={(e) => { if (e.button === 0 || e.button === 2) startDrag(e, 'occlusion', shape.id, pi, rawPts); }}
+                onPointerDown={(e) => {
+                  if (e.button === 0 || e.button === 2) {
+                    selectMask();
+                    startDrag(e, 'occlusion', shape.id, pi, rawPts);
+                  }
+                }}
               />
             ))}
           </g>
         );
       })}
-      {/* Collision shapes — dashed orange */}
+      {/* Collision shapes — orange (solid) or green (one-way) */}
       {shapes.map((shape, si) => {
         const rawPts = shape.points || [];
         const pts = (dragging?.kind === 'collision' && dragging.shapeId === shape.id && dragPts)
           ? dragPts : rawPts;
         if (!pts.length) return null;
         const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + (shape.closed ? ' Z' : '');
+        const isSelected = shape.id === selectedColliderShapeId;
+        const color = shape.oneWay
+          ? (isSelected ? 'rgba(140,255,140,1)' : 'rgba(80,220,80,0.9)')
+          : (isSelected ? 'rgba(255,200,80,1)'  : 'rgba(255,165,0,0.85)');
+        const nodeColor = shape.oneWay
+          ? (isSelected ? 'rgba(140,255,140,1)' : 'rgba(80,220,80,0.95)')
+          : (isSelected ? 'rgba(255,200,80,1)'  : 'rgba(255,165,0,0.9)');
+
+        // Build perpendicular tick marks for one-way shapes.
+        // Ticks point in the "block from above" direction (upward in screen space).
+        const ticks = [];
+        if (shape.oneWay) {
+          const TICK_INTERVAL = 24;
+          const TICK_LEN = 7;
+          for (let i = 0; i < pts.length - 1; i++) {
+            const ax = pts[i].x, ay = pts[i].y;
+            const bx = pts[i + 1].x, by = pts[i + 1].y;
+            const len = Math.hypot(bx - ax, by - ay);
+            if (len < 4) continue;
+            const dx = (bx - ax) / len, dy = (by - ay) / len;
+            // Perpendicular: two options; pick the one pointing more upward (smaller Y in screen space)
+            const nx = dy, ny = -dx;   // rotate +90°
+            const upY = ny < 0 ? ny : -ny;
+            const upX = ny < 0 ? nx : -nx;
+            const count = Math.max(1, Math.floor(len / TICK_INTERVAL));
+            for (let t = 0; t <= count; t++) {
+              const frac = count === 0 ? 0.5 : t / count;
+              const mx = ax + dx * len * frac;
+              const my = ay + dy * len * frac;
+              ticks.push({ x1: mx, y1: my, x2: mx + upX * TICK_LEN, y2: my + upY * TICK_LEN });
+            }
+          }
+        }
+
+        const selectShape = () => onSelectColliderShape?.(shape.id);
+
         return (
           <g key={shape.id || si}>
-            <path d={d} fill="none" stroke="rgba(255,165,0,0.85)" strokeWidth={2} strokeDasharray="5 3" />
+            {/* Wide transparent hit area — always selects this shape on click,
+                even in line-drawing mode, preventing accidental new-point placement */}
+            <path d={d} fill="none" stroke="transparent" strokeWidth={12}
+              style={{ pointerEvents: 'all', cursor: 'pointer' }}
+              onPointerDown={(e) => { if (e.button === 0) selectShape(); }}
+              onClick={(e) => e.stopPropagation()}
+            />
+            <path d={d} fill="none" stroke={color} strokeWidth={isSelected ? 2.5 : 2} strokeDasharray="5 3"
+              style={{ pointerEvents: 'none' }}
+            />
+            {ticks.map((t, ti) => (
+              <line key={ti} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke={color} strokeWidth={1.5}
+                style={{ pointerEvents: 'none' }} />
+            ))}
+            {isSelected && (
+              <path d={d} fill="none" stroke={color} strokeWidth={6} strokeDasharray="5 3" opacity={0.18}
+                style={{ pointerEvents: 'none' }} />
+            )}
             {pts.map((p, pi) => (
-              <circle key={pi} cx={p.x} cy={p.y} r={5}
-                fill="rgba(255,165,0,0.9)" stroke="rgba(0,0,0,0.6)" strokeWidth={1}
+              <circle key={pi} cx={p.x} cy={p.y} r={isSelected ? 6 : 5}
+                fill={nodeColor} stroke={isSelected ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.6)'} strokeWidth={1}
                 style={{ cursor: 'grab', pointerEvents: 'all' }}
-                onPointerDown={(e) => { if (e.button === 0 || e.button === 2) startDrag(e, 'collision', shape.id, pi, rawPts); }}
+                onPointerDown={(e) => {
+                  if (e.button === 0 || e.button === 2) {
+                    selectShape();
+                    startDrag(e, 'collision', shape.id, pi, rawPts);
+                  }
+                }}
               />
             ))}
           </g>
@@ -727,6 +813,10 @@ export default function LevelCanvas({
   onDeleteEntities,
   paintBrush,
   onUpdateLevel,
+  selectedColliderShapeId,
+  onSelectColliderShape,
+  selectedOcclusionShapeId,
+  onSelectOcclusionShape,
 }) {
   const ref = useRef(null);
 
@@ -772,7 +862,8 @@ export default function LevelCanvas({
   const handleCommitShape = useCallback((shape) => {
     const id = `cs_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     onUpdateLevel({ colliderShapes: [...(level?.colliderShapes || []), { ...shape, id }] });
-  }, [level?.colliderShapes, onUpdateLevel]);
+    onSelectColliderShape?.(id);
+  }, [level?.colliderShapes, onUpdateLevel, onSelectColliderShape]);
 
   const handleUpdateShapePoints = useCallback((shapeId, newPoints) => {
     onUpdateLevel({
@@ -782,10 +873,21 @@ export default function LevelCanvas({
     });
   }, [level?.colliderShapes, onUpdateLevel]);
 
+  const handleDeleteShape = useCallback((shapeId) => {
+    onUpdateLevel({ colliderShapes: (level?.colliderShapes || []).filter(s => s.id !== shapeId) });
+    onSelectColliderShape?.(null);
+  }, [level?.colliderShapes, onUpdateLevel, onSelectColliderShape]);
+
   const handleCommitOcclusionShape = useCallback((shape) => {
     const id = `oc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     onUpdateLevel({ occlusionShapes: [...(level?.occlusionShapes || []), { ...shape, id }] });
-  }, [level?.occlusionShapes, onUpdateLevel]);
+    onSelectOcclusionShape?.(id);
+  }, [level?.occlusionShapes, onUpdateLevel, onSelectOcclusionShape]);
+
+  const handleDeleteOcclusionShape = useCallback((shapeId) => {
+    onUpdateLevel({ occlusionShapes: (level?.occlusionShapes || []).filter(s => s.id !== shapeId) });
+    onSelectOcclusionShape?.(null);
+  }, [level?.occlusionShapes, onUpdateLevel, onSelectOcclusionShape]);
 
   const handleUpdateOcclusionShapePoints = useCallback((shapeId, newPoints) => {
     onUpdateLevel({
@@ -835,8 +937,14 @@ export default function LevelCanvas({
         isDrawingMask={paintBrush?.mode === 'mask'}
         onCommitShape={handleCommitShape}
         onUpdateShapePoints={handleUpdateShapePoints}
+        onDeleteShape={handleDeleteShape}
         onCommitOcclusionShape={handleCommitOcclusionShape}
         onUpdateOcclusionShapePoints={handleUpdateOcclusionShapePoints}
+        onDeleteOcclusionShape={handleDeleteOcclusionShape}
+        selectedColliderShapeId={selectedColliderShapeId}
+        onSelectColliderShape={onSelectColliderShape}
+        selectedOcclusionShapeId={selectedOcclusionShapeId}
+        onSelectOcclusionShape={onSelectOcclusionShape}
       />
       {entities.map(e => (
         <PlacedEntity

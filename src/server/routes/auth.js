@@ -136,6 +136,30 @@ authRouter.get('/me', requireAuth, async (req, res) => {
   res.json(req.user);
 });
 
+// ─── Update profile ───────────────────────────────────────────────────────────
+
+authRouter.patch('/me', requireAuth, async (req, res) => {
+  if (!await isAvailable()) return res.status(503).json({ error: 'Database required' });
+  const userId = req.user?.userId;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+  const { displayName, avatarUrl } = req.body || {};
+  const setClauses = [];
+  const values = [];
+  let idx = 1;
+
+  if (displayName !== undefined) { setClauses.push(`display_name = $${idx++}`); values.push(displayName); }
+  if (avatarUrl !== undefined)   { setClauses.push(`avatar_url = $${idx++}`);   values.push(avatarUrl); }
+
+  if (setClauses.length) {
+    values.push(userId);
+    await query(`UPDATE users SET ${setClauses.join(', ')} WHERE id = $${idx}`, values);
+  }
+
+  const { rows } = await query('SELECT * FROM users WHERE id = $1', [userId]);
+  res.json(userPublic(rows[0]));
+});
+
 // ─── Logout ───────────────────────────────────────────────────────────────────
 
 authRouter.post('/logout', (_req, res) => res.json({ ok: true }));

@@ -17,6 +17,27 @@ import { uploadAsset } from '../lib/assetUpload';
 
 const mkId = () => Math.random().toString(36).substring(2, 9);
 
+// Retro-styled toggle checkbox for the inspector.
+function RetroCheckbox({ checked, onChange }) {
+  return (
+    <div
+      onClick={() => onChange(!checked)}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 14, height: 14,
+        border: `1px solid ${checked ? 'var(--accent)' : 'var(--border)'}`,
+        background: checked ? 'var(--accent)' : 'transparent',
+        color: checked ? 'var(--bg)' : 'transparent',
+        fontSize: 10, fontFamily: 'monospace', fontWeight: 'bold',
+        cursor: 'pointer', userSelect: 'none',
+        transition: 'background 0.1s, border-color 0.1s',
+      }}
+    >
+      {checked ? '✓' : ''}
+    </div>
+  );
+}
+
 // ─── Tile palette ─────────────────────────────────────────────────────────
 // Renders each cell of the active tileset as a clickable swatch. Selecting
 // arms a paint brush; the LevelCanvas reads the brush and paints on click.
@@ -510,6 +531,199 @@ function IdleSlot({ idle, animSlots, expanded, onToggle, onChange, onRemove }) {
   );
 }
 
+// ─── Retro checkbox (styled, matches canvas CheckBox component) ───────────────
+function RetroCheck({ checked, onChange }) {
+  return (
+    <span
+      onClick={onChange}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 13, height: 13, flexShrink: 0,
+        border: `1px solid ${checked ? 'var(--accent)' : 'var(--border)'}`,
+        background: checked ? 'var(--accent)' : 'var(--bg)',
+        cursor: 'pointer', fontFamily: 'monospace', fontSize: 9, lineHeight: 1,
+        color: checked ? 'var(--bg)' : 'transparent',
+        userSelect: 'none', boxSizing: 'border-box',
+      }}
+    >✓</span>
+  );
+}
+
+// ─── Collider shape list with selection, inline rename, one-way toggle ────────
+function ColliderShapeList({ shapes, selectedColliderShapeId, onSelectColliderShape, onUpdateLevel, lvlId }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editingName, setEditingName] = useState('');
+  const selectedRef = useRef(null);
+
+  useEffect(() => {
+    if (selectedRef.current) {
+      selectedRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [selectedColliderShapeId]);
+
+  const commitName = (shapeId) => {
+    const trimmed = editingName.trim();
+    onUpdateLevel(lvlId, {
+      colliderShapes: shapes.map(s => s.id === shapeId ? { ...s, name: trimmed || undefined } : s),
+    });
+    setEditingId(null);
+  };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: 1 }}>COLLISION LINES</div>
+      {shapes.map((shape, si) => {
+        const isSelected = shape.id === selectedColliderShapeId;
+        const displayName = shape.name || `Line ${si + 1}`;
+        const nameColor = shape.oneWay ? 'rgba(100,220,100,0.95)' : 'rgba(255,165,0,0.9)';
+        return (
+          <div
+            key={shape.id || si}
+            ref={isSelected ? selectedRef : null}
+            onClick={() => onSelectColliderShape(shape.id)}
+            style={{
+              display: 'flex', flexDirection: 'column', gap: 3,
+              marginBottom: 4, padding: '4px 6px',
+              border: `1px solid ${isSelected ? (shape.oneWay ? 'rgba(100,220,100,0.5)' : 'rgba(255,165,0,0.5)') : 'rgba(255,255,255,0.07)'}`,
+              borderRadius: 2, cursor: 'pointer',
+              background: isSelected ? 'rgba(255,255,255,0.04)' : 'transparent',
+            }}
+          >
+            {/* Name row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {editingId === shape.id ? (
+                <input
+                  autoFocus
+                  value={editingName}
+                  onChange={e => setEditingName(e.target.value)}
+                  onBlur={() => commitName(shape.id)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitName(shape.id);
+                    if (e.key === 'Escape') setEditingId(null);
+                    e.stopPropagation();
+                  }}
+                  onClick={e => e.stopPropagation()}
+                  style={{
+                    flex: 1, fontFamily: 'monospace', fontSize: 10, padding: '1px 4px',
+                    background: 'var(--bg)', border: `1px solid ${nameColor}`,
+                    color: nameColor, outline: 'none',
+                  }}
+                />
+              ) : (
+                <span
+                  onDoubleClick={e => { e.stopPropagation(); setEditingId(shape.id); setEditingName(shape.name || ''); }}
+                  title="Double-click to rename"
+                  style={{ flex: 1, fontSize: 10, fontFamily: 'monospace', color: nameColor, userSelect: 'none' }}
+                >
+                  {shape.oneWay ? '⬆ ' : ''}{displayName}
+                  <span style={{ fontSize: 8, color: 'var(--text-dim)', marginLeft: 4 }}>· {shape.points?.length || 0} pts</span>
+                </span>
+              )}
+              <button
+                style={{ fontFamily: 'monospace', fontSize: 10, padding: '1px 5px', cursor: 'pointer',
+                  border: '1px solid var(--border)', background: 'transparent', color: '#ff6666', borderColor: '#ff6666', flexShrink: 0 }}
+                onClick={e => { e.stopPropagation(); onUpdateLevel(lvlId, { colliderShapes: shapes.filter(s => s.id !== shape.id) }); }}
+                title="Delete">×</button>
+            </div>
+            {/* One-way toggle */}
+            <label
+              style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 9, color: 'var(--text-dim)', userSelect: 'none' }}
+              onClick={e => e.stopPropagation()}
+            >
+              <RetroCheck
+                checked={!!shape.oneWay}
+                onChange={() => onUpdateLevel(lvlId, { colliderShapes: shapes.map(s => s.id === shape.id ? { ...s, oneWay: !s.oneWay } : s) })}
+              />
+              ONE-WAY PLATFORM
+            </label>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Mask shape list with selection and inline rename ─────────────────────────
+function MaskShapeList({ shapes, selectedOcclusionShapeId, onSelectOcclusionShape, onUpdateLevel, lvlId }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editingName, setEditingName] = useState('');
+  const selectedRef = useRef(null);
+
+  useEffect(() => {
+    if (selectedRef.current) {
+      selectedRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [selectedOcclusionShapeId]);
+
+  const commitName = (shapeId) => {
+    const trimmed = editingName.trim();
+    onUpdateLevel(lvlId, {
+      occlusionShapes: shapes.map(s => s.id === shapeId ? { ...s, name: trimmed || undefined } : s),
+    });
+    setEditingId(null);
+  };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: 1 }}>MASKS</div>
+      {shapes.map((shape, si) => {
+        const isSelected = shape.id === selectedOcclusionShapeId;
+        const displayName = shape.name || `Mask ${si + 1}`;
+        return (
+          <div
+            key={shape.id || si}
+            ref={isSelected ? selectedRef : null}
+            onClick={() => onSelectOcclusionShape(shape.id)}
+            style={{
+              display: 'flex', flexDirection: 'column', gap: 3,
+              marginBottom: 4, padding: '4px 6px',
+              border: `1px solid ${isSelected ? 'rgba(200,100,255,0.5)' : 'rgba(255,255,255,0.07)'}`,
+              borderRadius: 2, cursor: 'pointer',
+              background: isSelected ? 'rgba(200,100,255,0.06)' : 'transparent',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {editingId === shape.id ? (
+                <input
+                  autoFocus
+                  value={editingName}
+                  onChange={e => setEditingName(e.target.value)}
+                  onBlur={() => commitName(shape.id)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitName(shape.id);
+                    if (e.key === 'Escape') setEditingId(null);
+                    e.stopPropagation();
+                  }}
+                  onClick={e => e.stopPropagation()}
+                  style={{
+                    flex: 1, fontFamily: 'monospace', fontSize: 10, padding: '1px 4px',
+                    background: 'var(--bg)', border: '1px solid rgba(200,100,255,0.7)',
+                    color: 'rgba(200,100,255,0.9)', outline: 'none',
+                  }}
+                />
+              ) : (
+                <span
+                  onDoubleClick={e => { e.stopPropagation(); setEditingId(shape.id); setEditingName(shape.name || ''); }}
+                  title="Double-click to rename"
+                  style={{ flex: 1, fontSize: 10, fontFamily: 'monospace', color: isSelected ? 'rgba(220,120,255,1)' : 'rgba(180,0,255,0.9)', userSelect: 'none' }}
+                >
+                  {displayName}
+                  <span style={{ fontSize: 8, color: 'var(--text-dim)', marginLeft: 4 }}>· {shape.points?.length || 0} pts</span>
+                </span>
+              )}
+              <button
+                style={{ fontFamily: 'monospace', fontSize: 10, padding: '1px 5px', cursor: 'pointer',
+                  border: '1px solid var(--border)', background: 'transparent', color: '#ff6666', borderColor: '#ff6666', flexShrink: 0 }}
+                onClick={e => { e.stopPropagation(); onUpdateLevel(lvlId, { occlusionShapes: shapes.filter(s => s.id !== shape.id) }); }}
+                title="Delete">×</button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Inspector principal ──────────────────────────────────────────────────────
 function Inspector({
   component, isRow, onUpdate, onDelete, onDuplicate,
@@ -521,6 +735,8 @@ function Inspector({
   paintBrush = null, onSetPaintBrush = () => {},
   onAddBackgroundLayer = () => {}, onUpdateBackgroundLayer = () => {},
   onRemoveBackgroundLayer = () => {}, onMoveBackgroundLayer = () => {},
+  selectedColliderShapeId = null, onSelectColliderShape = () => {},
+  selectedOcclusionShapeId = null, onSelectOcclusionShape = () => {},
 }) {
   const selectedId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
   const [showIconPicker, setShowIconPicker] = useState(false);
@@ -1424,17 +1640,13 @@ function Inspector({
                       Click to place points · dbl-click or Esc to finish.<br/>Backspace undoes last point.
                     </div>
                     {shapes.length > 0 ? (
-                      <div style={{ marginTop: 8 }}>
-                        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: 1 }}>COLLISION LINES</div>
-                        {shapes.map((shape, si) => (
-                          <div key={shape.id || si} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,165,0,0.9)' }}>Line {si + 1} · {shape.points?.length || 0} pts</span>
-                            <button style={{ ...btnBase, background: 'transparent', color: '#ff6666', borderColor: '#ff6666' }}
-                              onClick={() => onUpdateLevel(lvl.id, { colliderShapes: shapes.filter(s => s.id !== shape.id) })}
-                              title="Delete">×</button>
-                          </div>
-                        ))}
-                      </div>
+                      <ColliderShapeList
+                        shapes={shapes}
+                        selectedColliderShapeId={selectedColliderShapeId}
+                        onSelectColliderShape={onSelectColliderShape}
+                        onUpdateLevel={onUpdateLevel}
+                        lvlId={lvl.id}
+                      />
                     ) : <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>No lines yet.</div>}
                   </>
                 )}
@@ -1443,20 +1655,17 @@ function Inspector({
                 {isMaskBrush && (
                   <>
                     <div style={{ fontSize: 10, color: 'rgba(180,0,255,0.85)', marginTop: 6, lineHeight: 1.5 }}>
-                      Dibuja un polígono sobre el objeto.<br/>El personaje quedará detrás de esa región.
+                      Click to place points · dbl-click or Esc to finish.<br/>
+                      Nested masks punch holes (donut effect).
                     </div>
                     {occlusionShapes.length > 0 ? (
-                      <div style={{ marginTop: 8 }}>
-                        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: 1 }}>MASKS</div>
-                        {occlusionShapes.map((shape, si) => (
-                          <div key={shape.id || si} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(180,0,255,0.9)' }}>Mask {si + 1} · {shape.points?.length || 0} pts</span>
-                            <button style={{ ...btnBase, background: 'transparent', color: '#ff6666', borderColor: '#ff6666' }}
-                              onClick={() => onUpdateLevel(lvl.id, { occlusionShapes: occlusionShapes.filter(s => s.id !== shape.id) })}
-                              title="Delete">×</button>
-                          </div>
-                        ))}
-                      </div>
+                      <MaskShapeList
+                        shapes={occlusionShapes}
+                        selectedOcclusionShapeId={selectedOcclusionShapeId}
+                        onSelectOcclusionShape={onSelectOcclusionShape}
+                        onUpdateLevel={onUpdateLevel}
+                        lvlId={lvl.id}
+                      />
                     ) : <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>No masks yet.</div>}
                   </>
                 )}
@@ -1504,10 +1713,29 @@ function Inspector({
         <div className="al-section-title">SCREEN SETTINGS</div>
         <div className="property-group">
           <label>NAME</label>
-          <input 
-            type="text" 
-            value={activeScreen?.name || ''} 
+          <input
+            type="text"
+            value={activeScreen?.name || ''}
             onChange={e => onUpdateScreen(activeScreen.id, { name: e.target.value })}
+          />
+        </div>
+        <div className="property-group">
+          <label style={{ fontSize: 10 }}>PUBLISH SLUG <span style={{ opacity: 0.5 }}>(URL path)</span></label>
+          <input
+            type="text"
+            value={activeScreen?.settings?.slug || ''}
+            onChange={e => onUpdateScreen(activeScreen.id, { settings: { ...activeScreen.settings, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') } })}
+            placeholder="my-page"
+          />
+        </div>
+        <div className="property-group">
+          <label style={{ fontSize: 10 }}>DESCRIPTION <span style={{ opacity: 0.5 }}>(meta)</span></label>
+          <textarea
+            value={activeScreen?.settings?.description || ''}
+            onChange={e => onUpdateScreen(activeScreen.id, { settings: { ...activeScreen.settings, description: e.target.value } })}
+            rows={2}
+            style={{ fontSize: 10, fontFamily: 'monospace' }}
+            placeholder="Short description for social sharing"
           />
         </div>
 
@@ -1578,6 +1806,25 @@ function Inspector({
           <>
             <div className="property-divider" style={{ marginTop: 20 }} />
             <div className="al-section-title">WORLD</div>
+            <div className="property-group">
+              <label style={{ fontSize: 10 }}>PUBLISH SLUG <span style={{ opacity: 0.5 }}>(URL path)</span></label>
+              <input
+                type="text"
+                value={activeScreen.worldSettings?.slug || ''}
+                onChange={e => onUpdateScreen(activeScreen.id, { worldSettings: { ...(activeScreen.worldSettings || {}), slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') } })}
+                placeholder="my-game"
+              />
+            </div>
+            <div className="property-group">
+              <label style={{ fontSize: 10 }}>DESCRIPTION</label>
+              <textarea
+                value={activeScreen.worldSettings?.description || ''}
+                onChange={e => onUpdateScreen(activeScreen.id, { worldSettings: { ...(activeScreen.worldSettings || {}), description: e.target.value } })}
+                rows={2}
+                style={{ fontSize: 10, fontFamily: 'monospace' }}
+                placeholder="Short description for social sharing"
+              />
+            </div>
             <div className="property-group">
               <label>DEFAULT VIEWPORT (new levels)</label>
               <select
@@ -2551,6 +2798,74 @@ function Inspector({
         {renderColor('MODAL BG','modalBg','')}
         {renderColor('BORDER COLOR','borderColor','')}
       </>);
+      case 'GameEmbed': {
+        const worlds = (screens || []).filter(s => s.kind === 'world');
+        return (<>
+          <div className="property-group">
+            <label>WORLD</label>
+            <select
+              value={localProps.worldId || ''}
+              onChange={e => {
+                const w = worlds.find(s => s.id === e.target.value);
+                updateAndCommit('worldId', e.target.value);
+                setTimeout(() => updateAndCommit('worldName', w?.name || ''), 0);
+              }}
+            >
+              <option value="">-- Select World --</option>
+              {worlds.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+          </div>
+          <div className="property-group">
+            <label>SCALING</label>
+            <select value={localProps.scaling || 'fit'} onChange={e => updateAndCommit('scaling', e.target.value)}>
+              <option value="fit">Fit</option>
+              <option value="fill">Fill</option>
+              <option value="fixed">Fixed</option>
+            </select>
+          </div>
+          {(localProps.scaling || 'fit') !== 'fixed' && (
+            <div className="property-group">
+              <label>MAINTAIN ASPECT</label>
+              <input
+                type="checkbox"
+                checked={localProps.maintainAspect !== false}
+                onChange={e => updateAndCommit('maintainAspect', e.target.checked)}
+              />
+            </div>
+          )}
+          <div className="property-group">
+            <label>SHOW WINDOW</label>
+            <RetroCheckbox
+              checked={localProps.showWindow !== false}
+              onChange={v => updateAndCommit('showWindow', v)}
+            />
+          </div>
+          {localProps.showWindow !== false && (
+            <div className="property-group">
+              <label>WINDOW TITLE</label>
+              <input
+                type="text"
+                value={localProps.windowTitle ?? ''}
+                placeholder={localProps.worldName || 'World name'}
+                onChange={e => updateAndCommit('windowTitle', e.target.value)}
+              />
+            </div>
+          )}
+          <div className="property-group">
+            <label>SHOW CONTROLS</label>
+            <input
+              type="checkbox"
+              checked={localProps.showControls !== false}
+              onChange={e => updateAndCommit('showControls', e.target.checked)}
+            />
+          </div>
+          {!localProps.worldId && (
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', padding: '6px 0', lineHeight: 1.5 }}>
+              Select a world to embed. The game renders live — size it via the Sizing panel below.
+            </div>
+          )}
+        </>);
+      }
       default: return <div style={{ color: 'var(--text-dim)' }}>[ Properties not available ]</div>;
     }
   };

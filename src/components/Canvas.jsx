@@ -34,11 +34,13 @@ import Tabs from './Componentes/Tabs';
 import Overlay from './Componentes/Overlay';
 import DataRepeater from './Componentes/DataRepeater';
 import Form from './Componentes/Form';
+import GameEmbed from './Componentes/GameEmbed';
 
 const componentMap = {
   Window, Frame, Row, Button, Text, Label: Text, Input: TextBox, TextBox, CheckBox, RadioButton,
   ComboBox, ListBox, Timer, Shape, Line, Image: ImageComp,
-  HScrollBar: ScrollBar, VScrollBar: ScrollBar, Data, Table, Loader, Tabs, Overlay, DataRepeater, Form
+  HScrollBar: ScrollBar, VScrollBar: ScrollBar, Data, Table, Loader, Tabs, Overlay, DataRepeater, Form,
+  GameEmbed,
 };
 
 const CONTAINER_TYPES = ['Window', 'Frame', 'Row', 'Tabs', 'DataRepeater', 'Form'];
