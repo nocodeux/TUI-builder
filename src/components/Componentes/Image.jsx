@@ -104,16 +104,8 @@ function Image({
 
   // Si hay iconSrc (de la librería interna), lo priorizamos
   if (iconSrc) {
-    // Better way: convert SVG to DataURI and use mask-image
-    // This ensures only the opaque parts of the SVG are colored
-    const svgData = iconSrc
-      .replace(/"/g, "'")
-      .replace(/#/g, '%23')
-      .replace(/[\n\r]/g, '')
-      .replace(/\s+/g, ' ');
-    
-    const dataUri = `data:image/svg+xml,${svgData}`;
-
+    const b64 = btoa(unescape(encodeURIComponent(iconSrc)));
+    const dataUri = `data:image/svg+xml;base64,${b64}`;
     return (
       <div style={containerStyle}>
         <div style={{
@@ -122,9 +114,11 @@ function Image({
           maskImage: `url("${dataUri}")`,
           maskRepeat: 'no-repeat',
           maskPosition: 'center',
+          maskSize: 'contain',
           WebkitMaskImage: `url("${dataUri}")`,
           WebkitMaskRepeat: 'no-repeat',
           WebkitMaskPosition: 'center',
+          WebkitMaskSize: 'contain',
         }} />
       </div>
     );
