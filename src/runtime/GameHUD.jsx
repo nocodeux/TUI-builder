@@ -56,7 +56,9 @@ function layoutToStyles(layout = {}) {
 // parentDirection: flex-direction of the enclosing container row.
 function renderComp(comp, ctx, parentDirection = 'row') {
   const p = comp.props || {};
-  const { onNavigateLevel, onNavigateScreen } = ctx;
+  const { onNavigateLevel, onNavigateScreen, overlay } = ctx;
+  // In block mode (hud-only), fill height has no definite parent — treat as auto.
+  const isOverlay = overlay !== false;
 
   const isWFill = p.sizing?.widthMode  === 'fill';
   const isHFill = p.sizing?.heightMode === 'fill';
@@ -84,13 +86,25 @@ function renderComp(comp, ctx, parentDirection = 'row') {
   // ── Row: single div, no retro-row class, mirrors export case 'Row' ────────
   if (comp.type === 'Row') {
     const rowDir = p.layout?.direction || 'row';
+    // In block mode, fill height has no overlay container to reference — use auto.
+    const heightVal = (isHFill && isOverlay) ? '100%' : 'auto';
+    const minHeightVal = (isHFill && isOverlay)
+      ? '100%'
+      : (p.height ? (typeof p.height === 'string' ? p.height : `${p.height}px`) : 32);
     return (
       <div style={{
         ...wrapStyle,
         ...layoutToStyles(p.layout),
         width:     isWFill ? '100%' : (p.width ? (typeof p.width === 'string' ? p.width : `${p.width}px`) : '100%'),
-        minHeight: isHFill ? '100%' : (p.height ? (typeof p.height === 'string' ? p.height : `${p.height}px`) : 32),
-        height:    isHFill ? '100%' : 'auto',
+        minHeight: minHeightVal,
+        height:    heightVal,
+        ...(p.bgColor ? { background: p.bgColor } : {}),
+        ...(p.bgImage ? {
+          backgroundImage: `url(${p.bgImage})`,
+          backgroundSize: p.bgImageFit === 'tile' ? 'auto' : (p.bgImageFit === 'fill' ? '100% 100%' : (p.bgImageFit || 'cover')),
+          backgroundRepeat: p.bgImageFit === 'tile' ? 'repeat' : 'no-repeat',
+          backgroundPosition: 'center',
+        } : {}),
       }}>
         {(comp.children || []).map(child => (
           <React.Fragment key={child.id}>
@@ -129,74 +143,92 @@ function renderComp(comp, ctx, parentDirection = 'row') {
   );
 }
 
-export default function GameHUD({ rows, onNavigateLevel, onNavigateScreen, viewMode }) {
-  const ctx = { onNavigateLevel, onNavigateScreen };
+// overlay=true  (default): HUD is position:absolute inset:0 over the game canvas (game+hud levels).
+// overlay=false           : HUD is a block element that drives its parent's height (hud-only levels).
+export default function GameHUD({ rows, onNavigateLevel, onNavigateScreen, viewMode, overlay = true }) {
+  const ctx = { onNavigateLevel, onNavigateScreen, overlay };
   const isMobile = viewMode === 'mobile';
 
-  // Mirrors export isSingleWindow logic
   const isSingleWindow =
     rows?.length === 1 &&
     rows[0]?.children?.length === 1 &&
     rows[0].children[0].type === 'Window';
 
-  // Full-size wrapper — fills the viewport frame.
-  // Uses flex-column + align-items:center so the content area can be
-  // centered when needed (mobile constraint, single-window).
+  const rowList = (rows || []).map(row => {
+    const rowDir = row.layout?.direction || 'row';
+    return (
+      <div
+        key={row.id}
+        style={{
+          ...layoutToStyles(row.layout),
+          width: '100%',
+          ...(isSingleWindow && overlay ? { justifyContent: 'center', alignItems: 'center' } : {}),
+        }}
+      >
+        {(row.children || []).map(comp => (
+          <React.Fragment key={comp.id}>
+            {renderComp(comp, ctx, rowDir)}
+          </React.Fragment>
+        ))}
+      </div>
+    );
+  });
+
+  if (!overlay) {
+    // Block mode for hud-only: flows in normal document flow, height driven by content.
+    return (
+      <div style={{
+        position:      'relative',
+        width:         '100%',
+        display:       'flex',
+        flexDirection: 'column',
+        alignItems:    'center',
+        pointerEvents: 'auto',
+        maxWidth:      isMobile ? 420 : undefined,
+      }}>
+        <div style={{
+          width:          '100%',
+          display:        'flex',
+          flexDirection:  'column',
+          ...(isSingleWindow ? { alignItems: 'center', justifyContent: 'center' } : {}),
+        }}>
+          {rowList}
+        </div>
+      </div>
+    );
+  }
+
+  // Overlay mode: fills the game viewport frame (position:absolute, inset:0).
   return (
     <div style={{
       position:      'absolute',
       inset:         0,
       display:       'flex',
       flexDirection: 'column',
-      alignItems:    'center',     // horizontal centering of content area
+      alignItems:    'center',
       overflow:      'auto',
       pointerEvents: 'auto',
     }}>
-      {/* Content area: mirrors .preview-area CSS + export previewStyles */}
       <div style={{
         boxSizing:      'border-box',
-        padding:        20,
-        // Mobile: constrain to 420px, matching .canvas.mobile .preview-area
+        padding:        0,
         width:          '100%',
         maxWidth:       isMobile ? 420 : undefined,
-        // Single-window: flex column centered (mirrors .preview-area.centered)
         ...(isSingleWindow ? {
           display:        'flex',
           flexDirection:  'column',
           alignItems:     'center',
           justifyContent: 'center',
-          flex:           1,          // stretch to full height for vertical centering
-          alignSelf:      'stretch',  // fill the flex outer container height
+          flex:           1,
+          alignSelf:      'stretch',
         } : {
-          display: 'block',
+          display:        'flex',
+          flexDirection:  'column',
+          flex:           1,
+          alignSelf:      'stretch',
         }),
       }}>
-        {(rows || []).map(row => {
-          const rowDir = row.layout?.direction || 'row';
-          return (
-            <div
-              key={row.id}
-              style={{
-                ...layoutToStyles(row.layout),
-                width: '100%',
-                margin: isSingleWindow ? 0 : '12px 0',
-                // For single-window: force center so the window is
-                // horizontally centered regardless of the row's default
-                // justify setting (which may be flex-start).
-                ...(isSingleWindow ? {
-                  justifyContent: 'center',
-                  alignItems:     'center',
-                } : {}),
-              }}
-            >
-              {(row.children || []).map(comp => (
-                <React.Fragment key={comp.id}>
-                  {renderComp(comp, ctx, rowDir)}
-                </React.Fragment>
-              ))}
-            </div>
-          );
-        })}
+        {rowList}
       </div>
     </div>
   );

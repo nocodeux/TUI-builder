@@ -25,8 +25,9 @@ function Button({
   const formContext = useContext(FormContext);
   const fileInputRef = useRef(null);
 
+  const isHug = sizing?.widthMode === 'hug' || !sizing?.widthMode;
   const cssWidth = sizing?.widthMode === 'fill' ? '100%'
-    : sizing?.widthMode === 'hug' ? 'fit-content'
+    : isHug ? 'max-content'
     : (typeof width === 'number' ? `${width}px`
        : (typeof width === 'string' && width.includes('%')) ? width
        : 'auto');
@@ -72,6 +73,7 @@ function Button({
         onClick={handleClick}
         style={{
           width: cssWidth,
+          ...(isHug ? { flexShrink: 0 } : {}),
           '--button-bg': bgColor || 'transparent',
           '--button-text': getThemeColor(textColor, '--text'),
           '--button-border': getThemeColor(borderColor, '--text'),

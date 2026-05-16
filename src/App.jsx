@@ -50,7 +50,7 @@ function App() {
   const [selectedIds, setSelectedIds] = useState([]); // Array of IDs
   const [lastSelectedId, setLastSelectedId] = useState(null); // For shift-select ranges if needed later
   const [viewMode, setViewMode] = useState('desktop');
-  const [theme, setTheme] = useState(() => localStorage.getItem('nanostudio_theme') || 'theme-nano');
+  const [theme, setTheme] = useState(() => localStorage.getItem('nanostudio_theme') || 'theme-retro');
   const [showUserJourney, setShowUserJourney] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showDatabase, setShowDatabase] = useState(false);
@@ -1177,8 +1177,8 @@ function App() {
   const getDefaultProps = type => ({
     Window: { title: 'Window1', width: 400, height: '', bgColor: '', textColor: '', borderColor: '', bgImage: '', bgImageFit: 'cover', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' }, staggered: false },
     Frame: { title: 'Frame1', width: 300, height: '', borderStyle: 'single', bgColor: '', textColor: '', borderColor: '', fontSize: 12, alignment: 'left', layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
-    Row: { layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fill', heightMode: 'hug' } },
-    Button: { text: 'Button1', bgColor: '', textColor: '', borderColor: '', width: 80, disabled: false, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
+    Row: { layout: { ...DEFAULT_LAYOUT }, sizing: { widthMode: 'fill', heightMode: 'hug' }, bgColor: '', bgImage: '', bgImageFit: 'cover' },
+    Button: { text: 'Button1', bgColor: '', textColor: '', borderColor: '', width: 80, disabled: false, sizing: { widthMode: 'hug', heightMode: 'hug' } },
     Text: { text: 'Text', textColor: '', fontSize: 12, alignment: 'left', linkUrl: '', sizing: { widthMode: 'hug', heightMode: 'hug' } },
     Input: { label: '', placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '', borderColor: '', bgColor: '', inputType: 'text', isOTP: false, digits: 4, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
     TextBox: { label: '', placeholder: 'Enter text...', width: 150, maxLength: 0, readOnly: false, disabled: false, textColor: '', borderColor: '', bgColor: '', inputType: 'text', isOTP: false, digits: 4, sizing: { widthMode: 'fixed', heightMode: 'hug' } },
@@ -1218,7 +1218,7 @@ function App() {
     Overlay: { title: 'Modal Overlay', isOpen: false, bgColor: '#000000', modalBg: '', borderColor: '', layout: { direction: 'column', gap: 8, align: 'stretch', justify: 'flex-start' }, sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
     DataRepeater: { tableName: '', layout: { direction: 'column', gap: 8, align: 'stretch', justify: 'flex-start' }, sizing: { widthMode: 'fill', heightMode: 'hug' } },
     Form: { targetTable: '', sourceTable: '', filterValue: '', padding: 10, layout: { direction: 'column', gap: 8, align: 'stretch', justify: 'flex-start' }, sizing: { widthMode: 'fill', heightMode: 'hug' } },
-    GameEmbed: { worldId: '', worldName: '', scaling: 'fit', maintainAspect: true, showControls: true, showWindow: true, windowTitle: '', width: 640, height: 360, sizing: { widthMode: 'fixed', heightMode: 'fixed' } },
+    GameEmbed: { worldId: '', worldName: '', scaling: 'fit', maintainAspect: true, showControls: true, showWindow: true, windowTitle: '', width: 640, height: 360, sizing: { widthMode: 'hug', heightMode: 'hug' } },
   }[type] || { text: type });
 
   const mkComp = type => {
@@ -1749,7 +1749,8 @@ function App() {
     document.title = builderName;
   }, [builderName]);
 
-  // Load settings from server (builderName is global; externalApis are per-user)
+  // Load settings from server on login.
+  // builderName is global (admin-set); theme + externalApis are per-user.
   useEffect(() => {
     if (!currentUser) return;
     apiFetch('/api/settings')
@@ -1757,20 +1758,23 @@ function App() {
       .then(data => {
         if (data.builderName) setBuilderName(data.builderName);
         if (data.externalApis) setExternalApis(data.externalApis);
+        // Apply the user's saved theme preference (falls back to current state if absent)
+        if (data.theme) setTheme(data.theme);
       })
       .catch(err => console.error('Error loading settings:', err));
   }, [currentUser]);
 
-  // Auto-save settings — builderName write is gated to admin on the server
+  // Auto-save settings — builderName write is gated to admin on the server.
+  // theme is saved as a per-user preference so each user keeps their own choice.
   useEffect(() => {
     if (!currentUser) return;
     if (isInitialLoading.current) return;
     apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ builderName, externalApis })
+      body: JSON.stringify({ builderName, externalApis, theme })
     }).catch(err => console.error('Error saving settings:', err));
-  }, [builderName, externalApis, currentUser]);
+  }, [builderName, externalApis, theme, currentUser]);
 
   useEffect(() => {
     if (!currentProject.id || currentProject.id === 'default') {
@@ -1794,7 +1798,7 @@ function App() {
           setScreens(data.screens);
           setCurrentScreenId(data.currentScreenId || data.screens[0].id);
         }
-        if (data.theme) setTheme(data.theme);
+        // theme is a per-user preference — don't override it from project data
         if (data.viewMode) setViewMode(data.viewMode);
         if (data.database) setDatabase(data.database);
         if (data.activeWindow) setActiveWindow(data.activeWindow);
@@ -1995,12 +1999,20 @@ function App() {
       }
       case 'Row': {
         const rowDirection = p.layout?.direction || 'row';
+        const rowBgStyles = p.bgImage ? {
+          backgroundImage: `url(${p.bgImage})`,
+          backgroundSize: p.bgImageFit === 'tile' ? 'auto' : (p.bgImageFit === 'fill' ? '100% 100%' : (p.bgImageFit || 'cover')),
+          backgroundRepeat: p.bgImageFit === 'tile' ? 'repeat' : 'no-repeat',
+          backgroundPosition: 'center',
+        } : {};
         const html = `<div id="${comp.id}" class="retro-row" style="${styleObjToString({
           ...wrapperStyle,
           ...layoutToStyles(p.layout),
           width: isWidthFill ? '100%' : (p.width ? (typeof p.width === 'string' ? p.width : `${p.width}px`) : '100%'),
           minHeight: isHeightFill ? '100%' : (p.height ? (typeof p.height === 'string' ? p.height : `${p.height}px`) : '32px'),
           height: isHeightFill ? '100%' : 'auto',
+          background: p.bgColor || 'transparent',
+          ...rowBgStyles,
         })}">${renderChildren(rowDirection)}</div>`;
         return html;
       }

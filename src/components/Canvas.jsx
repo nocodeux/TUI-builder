@@ -227,29 +227,42 @@ function DraggableComponent({
   const isHeightHug = sizing?.heightMode === 'hug';
 
   if (isWidthFill) {
-    sizingStyle.flexGrow = 1;
-    sizingStyle.flexShrink = 1;
-    // Use flex-basis 0 (not 0%) so children's width:100% resolves against the
-    // computed (post-grow) width rather than the zero percentage baseline.
-    sizingStyle.flexBasis = 0;
-    sizingStyle.minWidth = 0;
-    if (rowDirection === 'column' || isHeightFill) {
+    if (rowDirection === 'column') {
+      // Column parent: width is the cross axis — stretch to fill it, don't grow along height.
       sizingStyle.alignSelf = 'stretch';
+      sizingStyle.flexShrink = 0;
+    } else {
+      // Row parent: width is the main axis — grow to fill it.
+      sizingStyle.flexGrow = 1;
+      sizingStyle.flexShrink = 1;
+      sizingStyle.flexBasis = 0;
+      sizingStyle.minWidth = 0;
+      if (isHeightFill) {
+        sizingStyle.alignSelf = 'stretch';
+      }
     }
   } else if (isWidthHug) {
     sizingStyle.flexShrink = 0;
-    // Allow the wrapper to grow beyond the row's own width so hug-content
-    // items (especially buttons with long text) are never capped by a
-    // parent max-width constraint.
     sizingStyle.maxWidth = 'none';
     sizingStyle.overflow = 'visible';
   }
 
   if (isHeightFill) {
-    sizingStyle.alignSelf = 'stretch';
-    sizingStyle.flexGrow = 1;
-    sizingStyle.minHeight = 0;
     sizingStyle.flexDirection = 'column'; // so the child component can use height:100%
+    if (rowDirection === 'column') {
+      // Column parent: height is the main axis — grow to fill it.
+      sizingStyle.flexGrow = 1;
+      sizingStyle.flexShrink = 1;
+      sizingStyle.flexBasis = 0;
+      sizingStyle.minHeight = 0;
+    } else {
+      // Row parent: height is the cross axis — stretch to fill it.
+      sizingStyle.alignSelf = 'stretch';
+      sizingStyle.minHeight = 0;
+    }
+  } else if (isHeightHug && comp.type === 'GameEmbed') {
+    // GameEmbed has a fixed pixel height from nativeH — prevent parent stretch from overriding it.
+    sizingStyle.alignSelf = 'flex-start';
   }
 
   // Calculate padding based on drop indicator to create the "gap"
