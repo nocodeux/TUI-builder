@@ -7,6 +7,7 @@ import { settingsRouter } from './routes/settings.js';
 import { authRouter } from './routes/auth.js';
 import { assetsRouter } from './routes/assets.js';
 import { publishRouter } from './routes/publish.js';
+import { migrateRouter } from './routes/migrate.js';
 import { requireAuth } from './middleware/auth.js';
 import { runSchema, isAvailable, query } from './db/index.js';
 
@@ -54,6 +55,7 @@ app.use('/api/projects', requireAuth, projectsRouter);
 app.use('/api/settings', requireAuth, settingsRouter);
 app.use('/api/assets', requireAuth, assetsRouter);
 app.use('/api/publish', requireAuth, publishRouter);
+app.use('/api/admin/migrate', requireAuth, migrateRouter);
 
 // Health check
 app.get('/health', (_req, res) => {

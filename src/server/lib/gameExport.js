@@ -70,7 +70,7 @@ const BADGE_CSS = `
 .tuify-badge:hover .tuify-badge-cursor{background:#0a0a0a;}
 `;
 
-const BADGE_HTML = (origin) => `<a href="${origin || 'https://tuify.app'}" target="_blank" rel="noopener noreferrer" class="tuify-badge"><span class="tuify-badge-label"><span class="tuify-lbl-1">Designed</span> &middot; <span class="tuify-lbl-2">Built</span> &middot; <span class="tuify-lbl-3">Deployed</span> &middot; <span class="tuify-lbl-4">Maintained with</span></span><span class="tuify-badge-brand"><span class="tuify-word"><span class="tuify-l tuify-l1">T</span><span class="tuify-l tuify-l2">U</span><span class="tuify-l tuify-l3">I</span><span class="tuify-l tuify-l4">F</span><span class="tuify-l tuify-l5">Y</span><span class="tuify-domain">.app</span></span><span class="tuify-badge-cursor"></span></span></a>`;
+const BADGE_HTML = (origin) => `<a href="${origin || 'https://tuify.app'}" target="_blank" rel="noopener noreferrer" class="tuify-badge"><span class="tuify-badge-label"><span class="tuify-lbl-1">Design</span> &middot; <span class="tuify-lbl-2">Build</span> &middot; <span class="tuify-lbl-3">Deploy</span> &middot; <span class="tuify-lbl-4">Scale with</span></span><span class="tuify-badge-brand"><span class="tuify-word"><span class="tuify-l tuify-l1">T</span><span class="tuify-l tuify-l2">U</span><span class="tuify-l tuify-l3">I</span><span class="tuify-l tuify-l4">F</span><span class="tuify-l tuify-l5">Y</span><span class="tuify-domain">.app</span></span><span class="tuify-badge-cursor"></span></span></a>`;
 
 // ─── Game-only publish ────────────────────────────────────────────────────────
 // worlds: array of all world objects from the project (game = full set of worlds)

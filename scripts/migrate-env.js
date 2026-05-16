@@ -29,6 +29,8 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
+// Load .env.migrate first (migration-specific config), then fall back to .env
+try { (await import('dotenv')).config({ path: path.join(ROOT, '.env.migrate') }); } catch {}
 try { (await import('dotenv')).config({ path: path.join(ROOT, '.env') }); } catch {}
 
 // ─── Config ────────────────────────────────────────────────────────────────────
@@ -46,10 +48,10 @@ const SKIP_ASSETS = process.argv.includes('--skip-assets');
 function fail(msg) { console.error('\n✗', msg); process.exit(1); }
 function log(...a) { console.log(...a); }
 
-if (!STAGING_URL) fail('Set STAGING_URL  (e.g. https://feature-game-builder.tuify.app)');
-if (!PROD_URL)    fail('Set PROD_URL     (e.g. https://tuify.app)');
-if (!ADMIN_EMAIL) fail('Set ADMIN_EMAIL');
-if (!ADMIN_PASS)  fail('Set ADMIN_PASSWORD');
+if (!STAGING_URL) fail('Rellena STAGING_URL en .env.migrate  (URL del staging en el browser)');
+if (!PROD_URL)    fail('Rellena PROD_URL en .env.migrate     (URL de producción en el browser)');
+if (!ADMIN_EMAIL) fail('Rellena ADMIN_EMAIL en .env.migrate');
+if (!ADMIN_PASS)  fail('Rellena ADMIN_PASSWORD en .env.migrate');
 
 if (DRY_RUN) log('🔍 DRY RUN — nothing will be written to production\n');
 
@@ -154,7 +156,8 @@ const prodApi    = DRY_RUN ? async () => ({ success: true }) : makeApi(PROD_URL,
 // ─── Step 2: load all projects from staging ────────────────────────────────────
 
 log('→ Loading projects from staging…');
-const projectList = await stagingApi('GET', '/api/projects');
+// ?all=true lets admin see every project across all users (requires admin role)
+const projectList = await stagingApi('GET', '/api/projects?all=true');
 log(`  Found ${projectList.length} project(s)\n`);
 
 if (!projectList.length) {

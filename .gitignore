@@ -20,6 +20,7 @@ build/
 # --- ENVIRONMENT VARIABLES ---
 # Contains sensitive data (API keys, secrets)
 .env
+.env.migrate
 .env.local
 .env.production
 .env.development

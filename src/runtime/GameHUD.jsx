@@ -56,7 +56,7 @@ function layoutToStyles(layout = {}) {
 // parentDirection: flex-direction of the enclosing container row.
 function renderComp(comp, ctx, parentDirection = 'row') {
   const p = comp.props || {};
-  const { onNavigateLevel, onNavigateScreen, overlay } = ctx;
+  const { onNavigateLevel, onNavigateScreen, overlay, forceHeight } = ctx;
   // In block mode (hud-only), fill height has no definite parent — treat as auto.
   const isOverlay = overlay !== false;
 
@@ -86,14 +86,18 @@ function renderComp(comp, ctx, parentDirection = 'row') {
   // ── Row: single div, no retro-row class, mirrors export case 'Row' ────────
   if (comp.type === 'Row') {
     const rowDir = p.layout?.direction || 'row';
-    // In block mode, fill height has no overlay container to reference — use auto.
-    const heightVal = (isHFill && isOverlay) ? '100%' : 'auto';
-    const minHeightVal = (isHFill && isOverlay)
-      ? '100%'
-      : (p.height ? (typeof p.height === 'string' ? p.height : `${p.height}px`) : 32);
+    // forceHeight: row is a direct child of a fillContainer rowList div — fill regardless of heightMode.
+    // Strip forceHeight from children so nested rows aren't affected.
+    const childCtx = forceHeight ? { ...ctx, forceHeight: false } : ctx;
+    const fillH = forceHeight || (isHFill && isOverlay);
+    const heightVal    = fillH ? '100%' : 'auto';
+    const minHeightVal = fillH ? 0 : (p.height ? (typeof p.height === 'string' ? p.height : `${p.height}px`) : 32);
+    const effectiveWrap = forceHeight
+      ? { ...wrapStyle, flex: '1 1 auto', alignSelf: 'stretch', minHeight: 0 }
+      : wrapStyle;
     return (
       <div style={{
-        ...wrapStyle,
+        ...effectiveWrap,
         ...layoutToStyles(p.layout),
         width:     isWFill ? '100%' : (p.width ? (typeof p.width === 'string' ? p.width : `${p.width}px`) : '100%'),
         minHeight: minHeightVal,
@@ -108,7 +112,7 @@ function renderComp(comp, ctx, parentDirection = 'row') {
       }}>
         {(comp.children || []).map(child => (
           <React.Fragment key={child.id}>
-            {renderComp(child, ctx, rowDir)}
+            {renderComp(child, childCtx, rowDir)}
           </React.Fragment>
         ))}
       </div>
@@ -145,7 +149,7 @@ function renderComp(comp, ctx, parentDirection = 'row') {
 
 // overlay=true  (default): HUD is position:absolute inset:0 over the game canvas (game+hud levels).
 // overlay=false           : HUD is a block element that drives its parent's height (hud-only levels).
-export default function GameHUD({ rows, onNavigateLevel, onNavigateScreen, viewMode, overlay = true }) {
+export default function GameHUD({ rows, onNavigateLevel, onNavigateScreen, viewMode, overlay = true, fillContainer = false }) {
   const ctx = { onNavigateLevel, onNavigateScreen, overlay };
   const isMobile = viewMode === 'mobile';
 
@@ -156,18 +160,20 @@ export default function GameHUD({ rows, onNavigateLevel, onNavigateScreen, viewM
 
   const rowList = (rows || []).map(row => {
     const rowDir = row.layout?.direction || 'row';
+    const rowCtx = fillContainer ? { ...ctx, forceHeight: true } : ctx;
     return (
       <div
         key={row.id}
         style={{
           ...layoutToStyles(row.layout),
           width: '100%',
+          ...(fillContainer ? { flex: 1, minHeight: 0 } : {}),
           ...(isSingleWindow && overlay ? { justifyContent: 'center', alignItems: 'center' } : {}),
         }}
       >
         {(row.children || []).map(comp => (
           <React.Fragment key={comp.id}>
-            {renderComp(comp, ctx, rowDir)}
+            {renderComp(comp, rowCtx, rowDir)}
           </React.Fragment>
         ))}
       </div>

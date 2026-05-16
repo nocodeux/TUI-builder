@@ -19,20 +19,28 @@ function ensureDir() {
 function ownerId(req) { return req.user?.userId || null; }
 
 // ─── List projects ─────────────────────────────────────────────────────────────
+// Admin-only: GET /api/projects?all=true returns every project across all users.
 projectsRouter.get('/', async (req, res) => {
   try {
     if (await useDb()) {
-      const owner = ownerId(req);
-      const { rows } = owner
+      const owner   = ownerId(req);
+      const isAdmin = req.user?.role === 'admin';
+      const allMode = isAdmin && req.query.all === 'true';
+      const { rows } = allMode
         ? await query(
-            `SELECT id, name, last_saved AS "lastSaved", is_demo AS "isDemo", demo_order AS "demoOrder", cloned_from AS "clonedFrom"
-             FROM projects WHERE owner_id = $1 ORDER BY last_saved DESC`,
-            [owner]
-          )
-        : await query(
-            `SELECT id, name, last_saved AS "lastSaved", is_demo AS "isDemo", demo_order AS "demoOrder", cloned_from AS "clonedFrom"
+            `SELECT id, name, owner_id AS "ownerId", last_saved AS "lastSaved", is_demo AS "isDemo", demo_order AS "demoOrder", cloned_from AS "clonedFrom"
              FROM projects ORDER BY last_saved DESC`
-          );
+          )
+        : owner
+          ? await query(
+              `SELECT id, name, last_saved AS "lastSaved", is_demo AS "isDemo", demo_order AS "demoOrder", cloned_from AS "clonedFrom"
+               FROM projects WHERE owner_id = $1 ORDER BY last_saved DESC`,
+              [owner]
+            )
+          : await query(
+              `SELECT id, name, last_saved AS "lastSaved", is_demo AS "isDemo", demo_order AS "demoOrder", cloned_from AS "clonedFrom"
+               FROM projects ORDER BY last_saved DESC`
+            );
       return res.json(rows);
     }
     ensureDir();
@@ -58,8 +66,9 @@ projectsRouter.get('/:id', async (req, res) => {
   const { id } = req.params;
   try {
     if (await useDb()) {
-      const owner = ownerId(req);
-      const { rows } = owner
+      const owner   = ownerId(req);
+      const isAdmin = req.user?.role === 'admin';
+      const { rows } = (owner && !isAdmin)
         ? await query('SELECT data FROM projects WHERE id = $1 AND owner_id = $2', [id, owner])
         : await query('SELECT data FROM projects WHERE id = $1', [id]);
       if (!rows.length) return res.status(404).json({ error: 'Project not found' });
@@ -80,8 +89,9 @@ projectsRouter.get('/:id/assets', async (req, res) => {
   const empty = { sprites: [], tilesets: [], sounds: [], backgrounds: [] };
   try {
     if (await useDb()) {
-      const owner = ownerId(req);
-      const { rows } = owner
+      const owner   = ownerId(req);
+      const isAdmin = req.user?.role === 'admin';
+      const { rows } = (owner && !isAdmin)
         ? await query('SELECT assets_json FROM projects WHERE id = $1 AND owner_id = $2', [id, owner])
         : await query('SELECT assets_json FROM projects WHERE id = $1', [id]);
       return res.json(rows.length ? (rows[0].assets_json || empty) : empty);
