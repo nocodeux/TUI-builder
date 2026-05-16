@@ -15,7 +15,8 @@
     "check:arch": "node scripts/check-architecture.js",
     "migrate:paas": "node scripts/migrate-to-paas.js",
     "fix:owners": "node scripts/fix-orphan-projects.js",
-    "remap:urls": "node scripts/remap-bucket-urls.js"
+    "remap:urls": "node scripts/remap-bucket-urls.js",
+    "migrate:env": "node scripts/migrate-env.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1046.0",

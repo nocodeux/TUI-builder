@@ -95,7 +95,7 @@ const KEY_MAP = {
 // maintainAspect: boolean (ignored when scaling='fixed')
 // onNavigateExternal: optional — called when navigation targets a different world/screen
 // nativeW/nativeH: explicit pixel dims passed by GameEmbed (world-canonical); per-level dims used as fallback
-export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainAspect = true, onNavigateExternal, nativeW: propNativeW, nativeH: propNativeH }) {
+export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainAspect = true, onNavigateExternal, nativeW: propNativeW, nativeH: propNativeH, isFullscreen = false }) {
   const levels = world?.levels || [];
 
   const [currentLevelId, setCurrentLevelId] = useState(() => levels[0]?.id || null);
@@ -188,10 +188,10 @@ export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainA
       const canvas = canvasRef.current;
       if (!canvas) return;
 
-      // Container width is responsive; container height is auto (content-driven by the
-      // placeholder div). Use nativeH as the authoritative vertical container size.
-      const cw = wrap.clientWidth || nativeW;
-      const ch = nativeH;
+      // Normal mode: height is auto-driven by placeholder div → use nativeH.
+      // Fullscreen mode: container has definite flex height → read clientHeight.
+      const cw = wrap.clientWidth  || nativeW;
+      const ch = isFullscreen ? (wrap.clientHeight || nativeH) : nativeH;
 
       if (scaling === 'fixed') {
         canvas.style.width  = `${nativeW}px`;
@@ -222,26 +222,32 @@ export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainA
     const obs = new ResizeObserver(applyScale);
     obs.observe(wrap);
     return () => obs.disconnect();
-  }, [scaling, maintainAspect, nativeW, nativeH]);
+  }, [scaling, maintainAspect, nativeW, nativeH, isFullscreen]);
 
   if (!level) return null;
 
   const isHudOnly = !showGame && showHUD;
 
-  // Always auto-height wrapper — content drives height in normal flow.
-  // For game levels a hidden placeholder div establishes nativeH in normal flow;
-  // the actual canvas and HUD overlay that placeholder absolutely.
+  // Normal: auto-height wrapper, placeholder div establishes nativeH in normal flow.
+  // Fullscreen: height:100% wrapper (flex child), no placeholder — container height is definite.
+  const wrapStyle = isFullscreen
+    ? { position: 'relative', width: '100%', height: '100%', cursor: 'default' }
+    : { position: 'relative', width: '100%', cursor: 'default' };
+
   return (
     <div
       ref={wrapRef}
-      style={{ position: 'relative', width: '100%', cursor: 'default' }}
+      style={wrapStyle}
       onClick={() => canvasRef.current?.focus({ preventScroll: true })}
     >
       {showGame && (
         <>
-          {/* Normal-flow placeholder: pushes container to nativeH so gameAreaStyle (auto height) sizes correctly. */}
-          <div style={{ width: nativeW, height: nativeH, visibility: 'hidden', pointerEvents: 'none' }} />
-          {/* Canvas centred over the placeholder via absolute overlay */}
+          {/* Normal-flow placeholder: pushes auto-height container to nativeH.
+              Skipped in fullscreen — the container already has a definite flex height. */}
+          {!isFullscreen && (
+            <div style={{ width: nativeW, height: nativeH, visibility: 'hidden', pointerEvents: 'none' }} />
+          )}
+          {/* Canvas centred via absolute overlay */}
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
             <canvas
               ref={canvasRef}
@@ -255,14 +261,16 @@ export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainA
       )}
 
       {/* HUD:
-          - hud-only: block mode, normal flow, drives container height
-          - game+hud: overlay mode, position:absolute over canvas */}
+          - hud-only normal:     block mode, normal flow, drives auto height
+          - hud-only fullscreen: overlay mode, position:absolute fills container
+          - game+hud:            always overlay mode over canvas */}
       {showHUD && (
         <GameHUD
           rows={level?.rows || []}
           onNavigateLevel={handleNavigateLevel}
           onNavigateScreen={handleNavigateScreen}
-          overlay={!isHudOnly}
+          overlay={!isHudOnly || isFullscreen}
+          fillContainer={isFullscreen && isHudOnly}
         />
       )}
     </div>

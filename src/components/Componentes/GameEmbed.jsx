@@ -1,7 +1,7 @@
 // GameEmbed — embeds a live game world inside a page screen.
 // In the builder: renders the actual game via EmbedRuntime (WYSIWYG).
 // In export: renderComponentExport outputs a container div the React player mounts into.
-import React from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useGameContext } from '../../contexts/gameContext';
 import EmbedRuntime from './EmbedRuntime';
 
@@ -54,13 +54,66 @@ function ControlsCard() {
   );
 }
 
-function WindowFrame({ title, width, children, showControls, clip = true }) {
+// SVG icons: reliable across all fonts/platforms
+function IconExpand() {
   return (
-    <div style={{ display: 'inline-flex', flexDirection: 'column', width }}>
-      <div className="retro-window" style={{ width, display: 'flex', flexDirection: 'column', overflow: clip ? 'hidden' : 'visible' }}>
+    <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
+      <polyline points="1,4 1,1 4,1" />
+      <polyline points="5,8 8,8 8,5" />
+      <line x1="1" y1="1" x2="4.5" y2="4.5" />
+      <line x1="8" y1="8" x2="4.5" y2="4.5" />
+    </svg>
+  );
+}
+function IconCompress() {
+  return (
+    <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
+      <polyline points="4,1 4,4 1,4" />
+      <polyline points="5,8 5,5 8,5" />
+      <line x1="4" y1="4" x2="1" y2="1" />
+      <line x1="5" y1="5" x2="8" y2="8" />
+    </svg>
+  );
+}
+
+const MAX_BTN_STYLE = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  width: 16, height: 16,
+  border: '1px solid rgba(255,255,255,0.2)',
+  borderRadius: 2,
+  color: 'rgba(255,255,255,0.55)',
+  background: 'rgba(255,255,255,0.04)',
+  cursor: 'pointer',
+  userSelect: 'none',
+  flexShrink: 0,
+};
+
+function WindowFrame({ title, width, children, showControls, isFullscreen, onToggleFullscreen }) {
+  const outerStyle = isFullscreen
+    ? { display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }
+    : { display: 'inline-flex', flexDirection: 'column', width };
+
+  const windowStyle = isFullscreen
+    ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }
+    : { width, display: 'flex', flexDirection: 'column', overflow: 'hidden' };
+
+  return (
+    <div style={outerStyle}>
+      <div className="retro-window" style={windowStyle}>
         <div className="retro-window-titlebar">
           <span className="retro-window-title">{title}</span>
-          <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'monospace', opacity: 0.6 }}>▦</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            {onToggleFullscreen && (
+              <span
+                style={MAX_BTN_STYLE}
+                onClick={onToggleFullscreen}
+                title={isFullscreen ? 'Restaurar' : 'Pantalla completa'}
+              >
+                {isFullscreen ? <IconCompress /> : <IconExpand />}
+              </span>
+            )}
+            <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'monospace', opacity: 0.6 }}>▦</span>
+          </div>
         </div>
         {children}
       </div>
@@ -74,6 +127,36 @@ export default function GameEmbed({
   showControls = true, showWindow = true, windowTitle = '', width, height,
 }) {
   const { screens, assets } = useGameContext();
+
+  // ── Fullscreen ─────────────────────────────────────────────────────────────
+  const containerRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onFsChange = () => {
+      const el = containerRef.current;
+      setIsFullscreen(
+        document.fullscreenElement === el ||
+        document.webkitFullscreenElement === el
+      );
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
+
+  const toggleFullscreen = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (!isFullscreen) {
+      (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el);
+    } else {
+      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    }
+  };
 
   const world  = worldId ? (screens || []).find(s => s.id === worldId && s.kind === 'world') : null;
   const levels = world?.levels || [];
@@ -93,18 +176,13 @@ export default function GameEmbed({
   const resolvedW = (width === 'auto' || !width) ? nativeW : width;
   const resolvedH = (height === 'auto' || !height) ? nativeH : height;
 
-  // gameAreaStyle never has a fixed height — EmbedRuntime drives it via:
-  //   • a normal-flow placeholder div (for game levels) so height = nativeH
-  //   • GameHUD block layout (for hud-only levels) so height = HUD content
-  const gameAreaStyle = {
-    width: resolvedW,
-    position: 'relative',
-    overflow: 'hidden',
-    background: '#0a0a0a',
-    boxSizing: 'border-box',
-    fontFamily: 'monospace',
-    flexShrink: 0,
-  };
+  // Normal mode: fixed width, auto height driven by EmbedRuntime content.
+  // Fullscreen mode: flex-fill — the game area expands to fill the window frame.
+  const gameAreaStyle = isFullscreen
+    ? { flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden',
+        background: '#0a0a0a', boxSizing: 'border-box', fontFamily: 'monospace' }
+    : { width: resolvedW, position: 'relative', overflow: 'hidden',
+        background: '#0a0a0a', boxSizing: 'border-box', fontFamily: 'monospace', flexShrink: 0 };
 
   if (!worldId) {
     const pw = (width === 'auto' || !width) ? 640 : width;
@@ -117,13 +195,16 @@ export default function GameEmbed({
     );
     if (showWindow) {
       return (
-        <WindowFrame title={windowTitle || 'GAME EMBED'} width={pw} showControls={showControls}>
-          {placeholder}
-        </WindowFrame>
+        <div ref={containerRef}>
+          <WindowFrame title={windowTitle || 'GAME EMBED'} width={pw} showControls={showControls}
+            isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}>
+            {placeholder}
+          </WindowFrame>
+        </div>
       );
     }
     return (
-      <div style={{ display: 'inline-flex', flexDirection: 'column' }}>
+      <div ref={containerRef} style={{ display: 'inline-flex', flexDirection: 'column' }}>
         {placeholder}
         {showControls && <ControlsCard />}
       </div>
@@ -140,13 +221,16 @@ export default function GameEmbed({
     );
     if (showWindow) {
       return (
-        <WindowFrame title={windowTitle || worldName || 'World not found'} width={resolvedW} showControls={showControls}>
-          {errorContent}
-        </WindowFrame>
+        <div ref={containerRef}>
+          <WindowFrame title={windowTitle || worldName || 'World not found'} width={resolvedW} showControls={showControls}
+            isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}>
+            {errorContent}
+          </WindowFrame>
+        </div>
       );
     }
     return (
-      <div style={{ display: 'inline-flex', flexDirection: 'column' }}>
+      <div ref={containerRef} style={{ display: 'inline-flex', flexDirection: 'column' }}>
         {errorContent}
         {showControls && <ControlsCard />}
       </div>
@@ -155,7 +239,7 @@ export default function GameEmbed({
 
   const gameContent = (
     <div style={gameAreaStyle}>
-      {!showWindow && (
+      {!showWindow && !isFullscreen && (
         <div style={{
           position: 'absolute', top: 4, left: 6, zIndex: 10,
           fontSize: 8, color: 'rgba(255,255,255,0.3)', letterSpacing: 1,
@@ -169,20 +253,35 @@ export default function GameEmbed({
         maintainAspect={maintainAspect}
         nativeW={nativeW}
         nativeH={nativeH}
+        isFullscreen={isFullscreen}
       />
     </div>
   );
 
   if (showWindow) {
     return (
-      <WindowFrame title={windowTitle || world.name || 'GAME'} width={resolvedW} showControls={showControls}>
-        {gameContent}
-      </WindowFrame>
+      <div ref={containerRef} style={isFullscreen ? { width: '100%', height: '100%' } : {}}>
+        <WindowFrame
+          title={windowTitle || world.name || 'GAME'}
+          width={resolvedW}
+          showControls={showControls}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
+        >
+          {gameContent}
+        </WindowFrame>
+      </div>
     );
   }
 
   return (
-    <div style={{ display: 'inline-flex', flexDirection: 'column', width: resolvedW }}>
+    <div
+      ref={containerRef}
+      style={isFullscreen
+        ? { display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#0a0a0a' }
+        : { display: 'inline-flex', flexDirection: 'column', width: resolvedW }
+      }
+    >
       {gameContent}
       {showControls && <ControlsCard />}
     </div>
