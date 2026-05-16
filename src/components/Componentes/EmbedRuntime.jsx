@@ -193,7 +193,10 @@ export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainA
       const cw = wrap.clientWidth  || nativeW;
       const ch = isFullscreen ? (wrap.clientHeight || nativeH) : nativeH;
 
-      if (scaling === 'fixed') {
+      // In fullscreen, always fill (no black letterbox bars).
+      const effectiveScaling = (isFullscreen && scaling !== 'fixed') ? 'fill' : scaling;
+
+      if (effectiveScaling === 'fixed') {
         canvas.style.width  = `${nativeW}px`;
         canvas.style.height = `${nativeH}px`;
         return;
@@ -203,7 +206,7 @@ export default function EmbedRuntime({ world, assets, scaling = 'fit', maintainA
       if (!maintainAspect) {
         displayW = cw;
         displayH = ch;
-      } else if (scaling === 'fill') {
+      } else if (effectiveScaling === 'fill') {
         const s = Math.max(cw / nativeW, ch / nativeH);
         displayW = Math.round(nativeW * s);
         displayH = Math.round(nativeH * s);

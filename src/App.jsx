@@ -2348,18 +2348,29 @@ function App() {
             `</div>`
           : '';
 
-        // Game canvas container — React player mounts EmbedRuntime here
-        const gameDiv = `<div id="${containerId}" style="width:100%;height:${embedH};display:block;overflow:hidden;flex-shrink:0;"></div>`;
+        // Game canvas container — React player mounts EmbedRuntime here.
+        // Use min-height (not height) so hud-only levels can grow beyond the native canvas height.
+        const outerId = `_tfy_gout_${worldId.replace(/[^a-z0-9]/gi, '_')}`;
+        const gameDiv = `<div id="${containerId}" class="_tfy-embed-inner" style="width:100%;min-height:${embedH};height:auto;display:block;overflow:hidden;flex-shrink:0;"></div>`;
 
         // Outer column wrapper keeps game + controls stacked vertically,
         // exactly mirroring the inline-flex column layout of GameEmbed.jsx
         const outerStyle = `display:${isWidthFill ? 'flex' : 'inline-flex'};flex-direction:column;width:${embedW};`;
 
+        // Maximize button — uses Fullscreen API on the outer container
+        const expandSvg = `<svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><polyline points="1,4 1,1 4,1"/><polyline points="5,8 8,8 8,5"/><line x1="1" y1="1" x2="4.5" y2="4.5"/><line x1="8" y1="8" x2="4.5" y2="4.5"/></svg>`;
+        const compressSvg = `<svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><polyline points="4,1 4,4 1,4"/><polyline points="5,8 5,5 8,5"/><line x1="4" y1="4" x2="1" y2="1"/><line x1="5" y1="5" x2="8" y2="8"/></svg>`;
+        const maxBtnStyle = `display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border:1px solid rgba(255,255,255,0.2);border-radius:2px;color:rgba(255,255,255,0.55);background:rgba(255,255,255,0.04);cursor:pointer;user-select:none;flex-shrink:0;`;
+        const maxBtnOnClick = `(function(b){var o=document.getElementById('${outerId}');if(!document.fullscreenElement){(o.requestFullscreen||o.webkitRequestFullscreen).call(o);}else{(document.exitFullscreen||document.webkitExitFullscreen).call(document);}})()`;
+        const maxBtnHtml = `<span style="${maxBtnStyle}" onclick="${maxBtnOnClick}" title="Pantalla completa"><span class="tfy-fs-expand">${expandSvg}</span><span class="tfy-fs-compress">${compressSvg}</span></span>`;
+        const decorIcon = `<span style="font-size:9px;font-family:monospace;opacity:0.6">▦</span>`;
+        const titlebarRight = `<div style="display:flex;align-items:center;gap:5px;">${maxBtnHtml}${decorIcon}</div>`;
+
         if (showWindow) {
           return wrapComponent(
-            `<div style="${outerStyle}">` +
+            `<div id="${outerId}" data-tfy-game-outer style="${outerStyle}">` +
             `<div class="retro-window" style="width:100%;display:flex;flex-direction:column;overflow:hidden;">` +
-            `<div class="retro-window-titlebar"><span class="retro-window-title">${titleText}</span></div>` +
+            `<div class="retro-window-titlebar"><span class="retro-window-title">${titleText}</span>${titlebarRight}</div>` +
             gameDiv +
             `</div>` +
             controlsHtml +
@@ -2540,9 +2551,9 @@ body {
   flex: 1 1 auto !important;
   min-height: 40px !important;
 }
-.layout-row, .retro-row, .export-wrapper { 
-  background: transparent !important; 
-  border: none !important; 
+.layout-row, .retro-row, .export-wrapper {
+  background-color: transparent;
+  border: none !important;
 }
 .retro-window, .retro-frame {
   background: ${t.bg} !important;
@@ -2595,6 +2606,23 @@ body {
 .export-wrapper > * { max-width: 100%; }
 .export-wrapper { padding: 0 !important; border: none !important; outline: none !important; }
 .drop-zone, .new-row-drop, .drop-indicator { display: none !important; }
+/* ── Game embed fullscreen ── */
+.tfy-fs-compress { display: none; }
+[data-tfy-game-outer]:fullscreen,
+[data-tfy-game-outer]:-webkit-full-screen {
+  width: 100% !important; height: 100% !important;
+  display: flex !important; flex-direction: column !important;
+}
+[data-tfy-game-outer]:fullscreen .retro-window,
+[data-tfy-game-outer]:-webkit-full-screen .retro-window { flex: 1; min-height: 0; }
+[data-tfy-game-outer]:fullscreen ._tfy-embed-inner,
+[data-tfy-game-outer]:-webkit-full-screen ._tfy-embed-inner {
+  flex: 1 !important; min-height: 0 !important;
+}
+[data-tfy-game-outer]:fullscreen .tfy-fs-expand,
+[data-tfy-game-outer]:-webkit-full-screen .tfy-fs-expand { display: none; }
+[data-tfy-game-outer]:fullscreen .tfy-fs-compress,
+[data-tfy-game-outer]:-webkit-full-screen .tfy-fs-compress { display: inline; }
 /* ── TUIFY badge ── */
 .tuify-badge {
   position: fixed;

@@ -212,7 +212,7 @@ export default function GameHUD({ rows, onNavigateLevel, onNavigateScreen, viewM
       display:       'flex',
       flexDirection: 'column',
       alignItems:    'center',
-      overflow:      'auto',
+      overflow:      'hidden',
       pointerEvents: 'auto',
     }}>
       <div style={{

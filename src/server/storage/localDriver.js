@@ -10,8 +10,9 @@ export const localDriver = {
     const dir = uploadsDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, filename), buffer);
-    const base = (process.env.CDN_BASE_URL || 'http://localhost:3002/uploads').replace(/\/$/, '');
-    return { url: `${base}/${filename}`, key: `uploads/${filename}` };
+    const cdn = process.env.CDN_BASE_URL;
+    const url = cdn ? `${cdn.replace(/\/$/, '')}/${filename}` : `/uploads/${filename}`;
+    return { url, key: `uploads/${filename}` };
   },
 
   async delete(key) {
