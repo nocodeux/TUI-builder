@@ -7,11 +7,44 @@
 //   window.__TUIFY_ASSETS__  — assets sidecar object
 //   window.__TUIFY_EMBEDS__  — array of embed descriptors (page embeds)
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import EmbedRuntime from '../components/Componentes/EmbedRuntime';
+
+// Wrapper for page-embed GameEmbed: detects fullscreen state set by the static
+// HTML maximize button and passes isFullscreen into EmbedRuntime.
+function EmbedPlayer({ world, assets, scaling, maintainAspect }) {
+  const wrapRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onFsChange = () => {
+      const el = wrapRef.current;
+      const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      setIsFullscreen(!!fsEl && !!el && fsEl.contains(el));
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
+
+  return (
+    <div ref={wrapRef} style={{ width: '100%', height: isFullscreen ? '100%' : 'auto' }}>
+      <EmbedRuntime
+        world={world}
+        assets={assets}
+        scaling={scaling || 'fit'}
+        maintainAspect={maintainAspect !== false}
+        isFullscreen={isFullscreen}
+      />
+    </div>
+  );
+}
 
 // Full-page standalone game: manages which world is currently displayed,
 // handles cross-world navigation from HUD buttons.
@@ -64,7 +97,7 @@ function init() {
       if (!container || !world) return;
       createRoot(container).render(
         <DndProvider backend={HTML5Backend}>
-          <EmbedRuntime
+          <EmbedPlayer
             world={world}
             assets={embedAssets || {}}
             scaling={scaling || 'fit'}
